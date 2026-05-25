@@ -57,7 +57,6 @@ export default function QuizPage() {
   const [correctCount, setCorrectCount] = useState(0);
   const [isComplete, setIsComplete] = useState(false);
 
-  // טעינת שאלות
   useEffect(() => {
     loadQuestions();
   }, []);
@@ -97,7 +96,7 @@ export default function QuizPage() {
 
       const result = await response.json() as AnswerResult;
       setAnswerResult(result);
-      
+
       if (result.is_correct) {
         setTotalScore((prev) => prev + result.points_earned);
         setCorrectCount((prev) => prev + 1);
@@ -133,7 +132,6 @@ export default function QuizPage() {
     loadQuestions();
   }
 
-  // Loading state
   if (isLoading) {
     return (
       <div dir="rtl" className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
@@ -145,7 +143,6 @@ export default function QuizPage() {
     );
   }
 
-  // Error state
   if (error) {
     return (
       <div dir="rtl" className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
@@ -164,7 +161,6 @@ export default function QuizPage() {
     );
   }
 
-  // Complete state
   if (isComplete) {
     const accuracy = Math.round((correctCount / questions.length) * 100);
     const emoji = accuracy >= 80 ? '🏆' : accuracy >= 60 ? '👏' : '💪';
@@ -210,7 +206,7 @@ export default function QuizPage() {
             </div>
 
             <div className="flex gap-3 justify-center">
-              
+              <a
                 href="/"
                 className="px-6 py-2.5 border border-slate-300 hover:bg-slate-50 text-slate-700 rounded-lg font-medium transition"
               >
@@ -229,13 +225,11 @@ export default function QuizPage() {
     );
   }
 
-  // Quiz state
   const question = questions[currentIndex];
   const progressPercent = ((currentIndex + 1) / questions.length) * 100;
 
   return (
     <div dir="rtl" className="min-h-screen bg-slate-50">
-      {/* Header */}
       <header className="bg-white border-b border-slate-200">
         <div className="max-w-3xl mx-auto px-6 py-4 flex justify-between items-center">
           <div className="flex items-center gap-3">
@@ -244,7 +238,7 @@ export default function QuizPage() {
             </a>
             <div>
               <h1 className="font-semibold text-slate-900 leading-tight">קוויז יומי</h1>
-              <p className="text-xs text-slate-500">חימום של 3 דק' לפני המשמרת</p>
+              <p className="text-xs text-slate-500">חימום של 3 דק לפני המשמרת</p>
             </div>
           </div>
           <a href="/" className="text-sm text-slate-500 hover:text-slate-900">
@@ -254,7 +248,6 @@ export default function QuizPage() {
       </header>
 
       <main className="max-w-2xl mx-auto px-6 py-8">
-        {/* Progress */}
         <div className="flex justify-between items-center mb-3 px-1">
           <p className="text-sm text-slate-600 font-medium">
             שאלה {currentIndex + 1} מתוך {questions.length}
@@ -271,9 +264,7 @@ export default function QuizPage() {
           />
         </div>
 
-        {/* Question Card */}
         <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 mb-4">
-          {/* Tags */}
           <div className="flex gap-2 mb-4">
             <span className="text-xs px-2.5 py-1 bg-slate-100 text-slate-700 rounded-md font-medium">
               {categoryLabels[question.category] || question.category}
@@ -282,16 +273,14 @@ export default function QuizPage() {
               {difficultyLabels[question.difficulty]}
             </span>
             <span className="text-xs px-2.5 py-1 bg-blue-50 text-blue-700 rounded-md font-medium">
-              +{question.points} נק'
+              +{question.points} נק
             </span>
           </div>
 
-          {/* Question */}
           <h2 className="text-lg font-semibold text-slate-900 mb-6 leading-relaxed">
             {question.question_text}
           </h2>
 
-          {/* Options */}
           <div className="space-y-2.5">
             {question.options.map((option, index) => {
               const isSelected = selectedOption === index;
@@ -331,7 +320,6 @@ export default function QuizPage() {
             })}
           </div>
 
-          {/* Feedback */}
           {answerResult && (
             <div
               className={`mt-5 p-4 rounded-xl ${
@@ -346,7 +334,7 @@ export default function QuizPage() {
                 }`}
               >
                 {answerResult.is_correct
-                  ? `✓ תשובה נכונה · +${answerResult.points_earned} נק'`
+                  ? `✓ תשובה נכונה · +${answerResult.points_earned} נק`
                   : '✗ לא נכון - לפעם הבאה'}
               </p>
               <p
@@ -359,7 +347,6 @@ export default function QuizPage() {
             </div>
           )}
 
-          {/* Next button */}
           {answerResult && (
             <button
               onClick={handleNext}
