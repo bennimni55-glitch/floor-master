@@ -1,8 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import { useEffect } from 'react';
+import { createBrowserClient } from '@supabase/ssr';
 
 interface QueryHistory {
   question: string;
@@ -15,23 +15,14 @@ export default function HelperPage() {
   const [history, setHistory] = useState<QueryHistory[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [userInfo, setUserInfo] = useState<{ email: string; isAdmin: boolean } | null>(null);
+  const [userEmail, setUserEmail] = useState<string>('');
 
-  // טעינת פרטי משתמש
   useEffect(() => {
     async function loadUser() {
       const supabase = createClient();
       const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        const supabasePublic = createClient();
-        const { data: access } = await supabasePublic
-          .from('user_app_access' as never)
-          .select('is_floor_master_admin')
-          .single();
-        setUserInfo({
-          email: user.email || '',
-          isAdmin: (access as { is_floor_master_admin?: boolean })?.is_floor_master_admin || false,
-        });
+      if (user?.email) {
+        setUserEmail(user.email);
       }
     }
     loadUser();
@@ -61,7 +52,6 @@ export default function HelperPage() {
         throw new Error(data.error || 'שגיאה');
       }
 
-      // הוספה לתחילת ההיסטוריה
       setHistory((prev) => [
         { question: currentQuestion, answer: data.answer, timestamp: new Date() },
         ...prev,
@@ -88,7 +78,6 @@ export default function HelperPage() {
 
   return (
     <div dir="rtl" className="min-h-screen bg-slate-50">
-      {/* Header */}
       <header className="bg-white border-b border-slate-200">
         <div className="max-w-4xl mx-auto px-6">
           <div className="flex items-center justify-between py-4">
@@ -109,7 +98,6 @@ export default function HelperPage() {
       </header>
 
       <main className="max-w-4xl mx-auto px-6 py-8">
-        {/* Question Form */}
         <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 mb-6">
           <form onSubmit={handleAsk} className="space-y-4">
             <div>
@@ -153,7 +141,6 @@ export default function HelperPage() {
             </div>
           </form>
 
-          {/* Quick questions */}
           <div className="mt-6 pt-6 border-t border-slate-100">
             <p className="text-xs text-slate-500 mb-2">שאלות נפוצות:</p>
             <div className="flex flex-wrap gap-2">
@@ -171,7 +158,6 @@ export default function HelperPage() {
           </div>
         </div>
 
-        {/* History */}
         {history.length > 0 && (
           <div className="space-y-4">
             <h2 className="text-sm font-medium text-slate-500 px-2">
@@ -182,11 +168,10 @@ export default function HelperPage() {
                 key={i}
                 className="bg-white rounded-xl border border-slate-200 overflow-hidden"
               >
-                {/* Question */}
                 <div className="p-4 bg-slate-50 border-b border-slate-100">
                   <div className="flex items-start gap-3">
                     <div className="w-8 h-8 bg-slate-200 text-slate-700 rounded-full flex items-center justify-center text-xs font-medium flex-shrink-0">
-                      {userInfo ? getInitials(userInfo.email) : '👤'}
+                      {userEmail ? getInitials(userEmail) : '👤'}
                     </div>
                     <div className="flex-1">
                       <p className="text-sm text-slate-900 font-medium">
@@ -202,7 +187,6 @@ export default function HelperPage() {
                   </div>
                 </div>
 
-                {/* Answer */}
                 <div className="p-4">
                   <div className="flex items-start gap-3">
                     <div className="w-8 h-8 bg-slate-900 text-white rounded-full flex items-center justify-center text-xs flex-shrink-0">
@@ -218,7 +202,6 @@ export default function HelperPage() {
           </div>
         )}
 
-        {/* Empty state */}
         {history.length === 0 && (
           <div className="bg-slate-100 border-2 border-dashed border-slate-300 rounded-2xl p-12 text-center">
             <div className="text-4xl mb-3">💡</div>
