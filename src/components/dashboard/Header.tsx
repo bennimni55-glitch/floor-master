@@ -4,7 +4,7 @@ interface HeaderProps {
   userEmail: string;
   userInitials: string;
   isAdmin: boolean;
-  currentTab?: 'home' | 'quiz' | 'simulator' | 'helper' | 'admin';
+  currentTab?: 'home' | 'quiz' | 'simulator' | 'helper' | 'shifts' | 'admin';
 }
 
 export function Header({ userEmail, userInitials, isAdmin, currentTab = 'home' }: HeaderProps) {
@@ -13,6 +13,7 @@ export function Header({ userEmail, userInitials, isAdmin, currentTab = 'home' }
     { id: 'quiz', label: 'קוויז יומי', icon: '⚡', href: '/quiz' },
     { id: 'simulator', label: 'סימולטור', icon: '🎮', href: '/simulator' },
     { id: 'helper', label: 'עוזר בזמן אמת', icon: '💡', href: '/helper' },
+    { id: 'shifts', label: 'משמרות', icon: '📅', href: '/shifts' },
   ];
 
   if (isAdmin) {
