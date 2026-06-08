@@ -6,6 +6,7 @@ import { Header } from '@/components/dashboard/Header';
 import { KPICard } from '@/components/dashboard/KPICard';
 import { Card, CardHeader, CardBody } from '@/components/ui/Card';
 import { ClockInOut } from '@/components/dashboard/ClockInOut';
+import { MyShiftsHistory } from '@/components/dashboard/MyShiftsHistory';
 
 async function createPublicServerClient() {
   const cookieStore = await cookies();
@@ -55,7 +56,7 @@ export default async function HomePage() {
 
   const supabase = await createClient();
   
-  // טעינת המלצר הנוכחי (אם רשום)
+  // טעינת המלצר הנוכחי
   const { data: waiter } = await supabase
     .from('waiters')
     .select('id, full_name, role')
@@ -97,7 +98,7 @@ export default async function HomePage() {
       />
 
       <main className="max-w-6xl mx-auto px-6 py-8">
-        {/* Clock In/Out Widget - מוצג רק אם המשתמש רשום כמלצר */}
+        {/* Clock In/Out Widget */}
         {waiter && (
           <ClockInOut
             waiterId={waiter.id}
@@ -108,7 +109,6 @@ export default async function HomePage() {
           />
         )}
 
-        {/* Welcome banner - רק אם המשתמש לא מלצר רשום (כמו owner) */}
         {!waiter && (
           <div className="bg-gradient-to-l from-slate-900 to-slate-800 text-white rounded-2xl p-6 mb-6">
             <h2 className="text-xl font-semibold mb-1">
@@ -118,6 +118,11 @@ export default async function HomePage() {
               ברוך הבא לדשבורד המנהל
             </p>
           </div>
+        )}
+
+        {/* היסטוריית משמרות + טיפים - רק למלצרים */}
+        {waiter && (
+          <MyShiftsHistory waiterId={waiter.id} />
         )}
 
         {/* KPI Cards */}
@@ -166,39 +171,6 @@ export default async function HomePage() {
                   </button>
                 </div>
               ))}
-            </div>
-          </CardBody>
-        </Card>
-
-        {/* Next Shift */}
-        <Card>
-          <CardHeader>
-            <h3 className="font-semibold text-slate-900">המשמרת הקרובה</h3>
-          </CardHeader>
-          <CardBody>
-            <div className="flex justify-between items-start mb-4">
-              <div>
-                <p className="font-medium text-slate-900">חמישי · 28 במאי</p>
-                <p className="text-sm text-slate-500 mt-0.5">20:00 — 02:00 · סיט 1 + סיט 2</p>
-              </div>
-              <span className="text-xs bg-amber-100 text-amber-800 px-2.5 py-1 rounded-md font-medium">
-                ⚠️ צפוי עומס
-              </span>
-            </div>
-            
-            <div className="grid grid-cols-3 gap-4 pt-4 border-t border-slate-100">
-              <div>
-                <p className="text-xs text-slate-500">תזכורת מפיות</p>
-                <p className="text-sm font-medium text-slate-900 mt-0.5">23:20</p>
-              </div>
-              <div>
-                <p className="text-xs text-slate-500">סגירת חשבונות</p>
-                <p className="text-sm font-medium text-slate-900 mt-0.5">22:00</p>
-              </div>
-              <div>
-                <p className="text-xs text-slate-500">מעבר לסיט 2</p>
-                <p className="text-sm font-medium text-slate-900 mt-0.5">22:30</p>
-              </div>
             </div>
           </CardBody>
         </Card>
