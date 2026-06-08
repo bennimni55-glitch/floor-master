@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { createClient } from '@/lib/supabase/client';
 
 interface ClockInOutProps {
@@ -15,27 +15,48 @@ function formatTime(date: Date): string {
   return date.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' });
 }
 
-function calculateDuration(start: Date, end: Date): { hours: number; minutes: number; totalMinutes: number } {
+function calculateDuration(start: Date, end: Date): { hours: number; minutes: number; seconds: number; totalSeconds: number } {
   const diffMs = end.getTime() - start.getTime();
-  const totalMinutes = Math.floor(diffMs / 60000);
-  const hours = Math.floor(totalMinutes / 60);
-  const minutes = totalMinutes % 60;
-  return { hours, minutes, totalMinutes };
+  const totalSeconds = Math.max(0, Math.floor(diffMs / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  return { hours, minutes, seconds, totalSeconds };
 }
 
 export function ClockInOut({ waiterId, waiterName, activeClockId, activeClockStart, greeting }: ClockInOutProps) {
-  const [isWorking, setIsWorking] = useState(!!activeClockId);
-  const [clockId, setClockId] = useState(activeClockId);
-  const [clockStart, setClockStart] = useState(activeClockStart ? new Date(activeClockStart) : null);
+  const [clockId, setClockId] = useState<string | null>(activeClockId);
+  const [clockStart, setClockStart] = useState<Date | null>(
+    activeClockStart ? new Date(activeClockStart) : null
+  );
   const [currentTime, setCurrentTime] = useState(new Date());
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // טיימר חי
+  const isWorking = !!clockId && !!clockStart;
+
+  // טיימר חי - רץ כל שנייה כשבמשמרת
   useEffect(() => {
-    if (!isWorking) return;
-    const interval = setInterval(() => setCurrentTime(new Date()), 1000);
-    return () => clearInterval(interval);
+    if (isWorking) {
+      // מתחילים מיד
+      setCurrentTime(new Date());
+      intervalRef.current = setInterval(() => {
+        setCurrentTime(new Date());
+      }, 1000);
+    } else {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+    }
+
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+    };
   }, [isWorking]);
 
   async function clockIn() {
@@ -44,6 +65,7 @@ export function ClockInOut({ waiterId, waiterName, activeClockId, activeClockSta
     try {
       const supabase = createClient();
       const now = new Date();
+      
       const { data, error: insertError } = await supabase
         .from('shift_clock')
         .insert({
@@ -56,9 +78,9 @@ export function ClockInOut({ waiterId, waiterName, activeClockId, activeClockSta
 
       if (insertError) throw insertError;
       
+      // משתמשים בזמן המקומי (now) ולא בזמן מהשרת - כדי שלא יהיו בעיות אזור זמן
       setClockId(data.id);
-      setClockStart(new Date(data.clock_in));
-      setIsWorking(true);
+      setClockStart(now);
     } catch (err: unknown) {
       const e = err as { message?: string };
       setError(e.message || 'שגיאה בהתחלת משמרת');
@@ -77,7 +99,7 @@ export function ClockInOut({ waiterId, waiterName, activeClockId, activeClockSta
       const supabase = createClient();
       const now = new Date();
       const duration = calculateDuration(clockStart, now);
-      const hoursDecimal = (duration.totalMinutes / 60).toFixed(2);
+      const hoursDecimal = (duration.totalSeconds / 3600).toFixed(2);
 
       const { error: updateError } = await supabase
         .from('shift_clock')
@@ -89,11 +111,12 @@ export function ClockInOut({ waiterId, waiterName, activeClockId, activeClockSta
 
       if (updateError) throw updateError;
       
-      setIsWorking(false);
+      const hoursStr = String(duration.hours).padStart(2, '0');
+      const minsStr = String(duration.minutes).padStart(2, '0');
+      alert(`סיימת משמרת! עבדת ${hoursStr}:${minsStr} שעות (${hoursDecimal} שעות)`);
+      
       setClockId(null);
       setClockStart(null);
-      
-      alert(`סיימת משמרת! עבדת ${duration.hours} שעות ו-${duration.minutes} דקות`);
     } catch (err: unknown) {
       const e = err as { message?: string };
       setError(e.message || 'שגיאה בסיום משמרת');
@@ -138,7 +161,7 @@ export function ClockInOut({ waiterId, waiterName, activeClockId, activeClockSta
   }
 
   // מצב 2: במשמרת (טיימר חי)
-  const duration = clockStart ? calculateDuration(clockStart, currentTime) : { hours: 0, minutes: 0, totalMinutes: 0 };
+  const duration = clockStart ? calculateDuration(clockStart, currentTime) : { hours: 0, minutes: 0, seconds: 0, totalSeconds: 0 };
 
   return (
     <div className="bg-gradient-to-l from-green-600 to-emerald-700 text-white rounded-2xl p-6 mb-6 shadow-xl">
@@ -154,14 +177,14 @@ export function ClockInOut({ waiterId, waiterName, activeClockId, activeClockSta
             {waiterName} · התחלת ב-{clockStart ? formatTime(clockStart) : ''}
           </p>
           
-          {/* טיימר גדול */}
+          {/* טיימר גדול עם שניות */}
           <div className="bg-white/15 backdrop-blur-sm rounded-xl p-4 inline-block">
             <p className="text-xs text-green-100 mb-1">זמן במשמרת</p>
             <p className="text-3xl font-bold tabular-nums tracking-wider">
-              {String(duration.hours).padStart(2, '0')}:{String(duration.minutes).padStart(2, '0')}
-              <span className="text-base text-green-200 mr-2">
-                ({(duration.totalMinutes / 60).toFixed(1)} שעות)
-              </span>
+              {String(duration.hours).padStart(2, '0')}:{String(duration.minutes).padStart(2, '0')}:{String(duration.seconds).padStart(2, '0')}
+            </p>
+            <p className="text-xs text-green-200 mt-1">
+              ({(duration.totalSeconds / 3600).toFixed(2)} שעות)
             </p>
           </div>
         </div>
