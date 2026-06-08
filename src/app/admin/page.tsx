@@ -67,10 +67,34 @@ interface Waiter {
   role: string;
 }
 
+interface DayShift {
+  clock_id: string;
+  waiter_id: string;
+  full_name: string;
+  role: string;
+  clock_date: string;
+  clock_in: string;
+  clock_out: string | null;
+  hours_worked: number | null;
+  status: string;
+}
+
+interface TipResult {
+  waiter_id: string;
+  full_name: string;
+  role: string;
+  hours: number;
+  tip_amount: number;
+  is_runner: boolean;
+}
+
+const RUNNER_RATE = 50;
+
 const roleLabels: Record<string, string> = {
   waiter: 'מלצר',
   bartender: 'ברמן',
   hostess: 'מארחת',
+  runner: 'ראנר',
   manager: 'מנהל',
   admin: 'מנהל ראשי',
 };
@@ -138,6 +162,11 @@ function getInitials(name: string): string {
   return name.substring(0, 2).toUpperCase();
 }
 
+function formatTime(timeStr: string): string {
+  const date = new Date(timeStr);
+  return date.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' });
+}
+
 export default function AdminDashboard() {
   const [waiterStats, setWaiterStats] = useState<WaiterStat[]>([]);
   const [categories, setCategories] = useState<CategoryWeakness[]>([]);
@@ -149,16 +178,27 @@ export default function AdminDashboard() {
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   
-  // מודאל שיבוץ
+  // Modal שיבוץ
   const [scheduleModal, setScheduleModal] = useState<{
     waiterId: string;
     waiterName: string;
     date: string;
   } | null>(null);
 
+  // ===== טיפים =====
+  const [tipsDate, setTipsDate] = useState<string>(dateToISOString(new Date()));
+  const [dayShifts, setDayShifts] = useState<DayShift[]>([]);
+  const [totalTips, setTotalTips] = useState<string>('');
+  const [tipResults, setTipResults] = useState<TipResult[] | null>(null);
+  const [savedDistribution, setSavedDistribution] = useState<boolean>(false);
+
   useEffect(() => {
     loadData();
   }, []);
+
+  useEffect(() => {
+    loadDayShifts(tipsDate);
+  }, [tipsDate]);
 
   async function loadData() {
     setIsLoading(true);
@@ -189,7 +229,194 @@ export default function AdminDashboard() {
     }
   }
 
-  // האם מלצר זמין ביום הזה?
+  async function loadDayShifts(date: string) {
+    try {
+      const supabase = createClient();
+      const { data } = await supabase
+        .from('todays_shifts')
+        .select('*')
+        .eq('clock_date', date);
+      
+      setDayShifts((data || []) as DayShift[]);
+      setTipResults(null);
+      setSavedDistribution(false);
+
+      // בדיקה אם כבר יש חלוקה שמורה ליום הזה
+      const { data: existing } = await supabase
+        .from('tip_distributions')
+        .select('id, total_tips')
+        .eq('distribution_date', date)
+        .maybeSingle();
+      
+      if (existing) {
+        setTotalTips(String(existing.total_tips));
+        await loadSavedDistribution(existing.id);
+      } else {
+        setTotalTips('');
+      }
+    } catch (err) {
+      console.error('Error loading day shifts:', err);
+    }
+  }
+
+  async function loadSavedDistribution(distributionId: string) {
+    try {
+      const supabase = createClient();
+      const { data } = await supabase
+        .from('tip_distribution_details')
+        .select('waiter_id, role, hours_worked, tip_amount, waiters(full_name)')
+        .eq('distribution_id', distributionId);
+      
+      if (data && data.length > 0) {
+        const results: TipResult[] = data.map((d: { waiter_id: string; role: string; hours_worked: number; tip_amount: number; waiters: { full_name: string } | { full_name: string }[] }) => ({
+          waiter_id: d.waiter_id,
+          full_name: Array.isArray(d.waiters) ? d.waiters[0]?.full_name : d.waiters?.full_name || 'לא ידוע',
+          role: d.role,
+          hours: Number(d.hours_worked),
+          tip_amount: Number(d.tip_amount),
+          is_runner: d.role === 'runner',
+        }));
+        setTipResults(results);
+        setSavedDistribution(true);
+      }
+    } catch (err) {
+      console.error('Error loading distribution:', err);
+    }
+  }
+
+  function calculateTips() {
+    const tipsAmount = parseFloat(totalTips);
+    if (isNaN(tipsAmount) || tipsAmount <= 0) {
+      setError('הכנס סכום טיפים תקין');
+      return;
+    }
+
+    // מסננים רק משמרות שהסתיימו (יש להן clock_out)
+    const completed = dayShifts.filter(s => s.clock_out && s.hours_worked && s.hours_worked > 0);
+    
+    if (completed.length === 0) {
+      setError('אין משמרות שהסתיימו ביום הזה');
+      return;
+    }
+
+    setError(null);
+
+    // שלב 1: ראנרים מקבלים 50 ₪ × שעות
+    const runners = completed.filter(s => s.role === 'runner');
+    const nonRunners = completed.filter(s => s.role !== 'runner' && (s.role === 'waiter' || s.role === 'bartender'));
+    
+    const runnerResults: TipResult[] = runners.map(r => ({
+      waiter_id: r.waiter_id,
+      full_name: r.full_name,
+      role: r.role,
+      hours: Number(r.hours_worked),
+      tip_amount: Math.round(Number(r.hours_worked) * RUNNER_RATE * 100) / 100,
+      is_runner: true,
+    }));
+
+    const totalRunnerPay = runnerResults.reduce((sum, r) => sum + r.tip_amount, 0);
+    const remainingForWaiters = tipsAmount - totalRunnerPay;
+
+    // שלב 2: יתרה מתחלקת לפי שעות בין מלצרים+ברמנים
+    const totalWaiterHours = nonRunners.reduce((sum, w) => sum + Number(w.hours_worked), 0);
+    
+    let waiterResults: TipResult[] = [];
+    if (totalWaiterHours > 0 && remainingForWaiters > 0) {
+      const hourlyRate = remainingForWaiters / totalWaiterHours;
+      waiterResults = nonRunners.map(w => ({
+        waiter_id: w.waiter_id,
+        full_name: w.full_name,
+        role: w.role,
+        hours: Number(w.hours_worked),
+        tip_amount: Math.round(Number(w.hours_worked) * hourlyRate * 100) / 100,
+        is_runner: false,
+      }));
+    } else {
+      waiterResults = nonRunners.map(w => ({
+        waiter_id: w.waiter_id,
+        full_name: w.full_name,
+        role: w.role,
+        hours: Number(w.hours_worked),
+        tip_amount: 0,
+        is_runner: false,
+      }));
+    }
+
+    setTipResults([...runnerResults, ...waiterResults]);
+    setSavedDistribution(false);
+  }
+
+  async function saveDistribution() {
+    if (!tipResults || tipResults.length === 0) return;
+    
+    setActionLoading('save-tips');
+    setError(null);
+    
+    try {
+      const supabase = createClient();
+      const tipsAmount = parseFloat(totalTips);
+      
+      const runnerHours = tipResults.filter(r => r.is_runner).reduce((s, r) => s + r.hours, 0);
+      const waiterHours = tipResults.filter(r => !r.is_runner).reduce((s, r) => s + r.hours, 0);
+      const totalRunnerPay = tipResults.filter(r => r.is_runner).reduce((s, r) => s + r.tip_amount, 0);
+      const remaining = tipsAmount - totalRunnerPay;
+      const hourlyRate = waiterHours > 0 ? remaining / waiterHours : 0;
+
+      // מחיקת חלוקה ישנה אם קיימת
+      const { data: existing } = await supabase
+        .from('tip_distributions')
+        .select('id')
+        .eq('distribution_date', tipsDate)
+        .maybeSingle();
+      
+      if (existing) {
+        await supabase.from('tip_distribution_details').delete().eq('distribution_id', existing.id);
+        await supabase.from('tip_distributions').delete().eq('id', existing.id);
+      }
+
+      // יצירת חלוקה חדשה
+      const { data: newDist, error: distError } = await supabase
+        .from('tip_distributions')
+        .insert({
+          distribution_date: tipsDate,
+          total_tips: tipsAmount,
+          runner_rate: RUNNER_RATE,
+          total_runner_hours: runnerHours,
+          total_waiter_hours: waiterHours,
+          total_runner_pay: totalRunnerPay,
+          remaining_for_waiters: remaining,
+          hourly_rate_waiters: hourlyRate,
+        })
+        .select()
+        .single();
+
+      if (distError) throw distError;
+
+      // הוספת פרטים לכל מלצר
+      const details = tipResults.map(r => ({
+        distribution_id: newDist.id,
+        waiter_id: r.waiter_id,
+        role: r.role,
+        hours_worked: r.hours,
+        tip_amount: r.tip_amount,
+      }));
+
+      const { error: detailsError } = await supabase
+        .from('tip_distribution_details')
+        .insert(details);
+
+      if (detailsError) throw detailsError;
+
+      setSavedDistribution(true);
+      alert('חלוקת הטיפים נשמרה בהצלחה ✅');
+    } catch (err: unknown) {
+      const e = err as { message?: string };
+      setError(e.message || 'שגיאה בשמירה');
+    } finally {
+      setActionLoading(null);
+    }
+  }
+
   function isWaiterAvailable(waiterId: string, dateStr: string): { available: boolean; partial: boolean; times?: string } {
     const row = availability.find(a => a.waiter_id === waiterId && a.date === dateStr);
     if (!row || !row.availability_id) return { available: false, partial: false };
@@ -201,7 +428,6 @@ export default function AdminDashboard() {
     };
   }
 
-  // האם מלצר משובץ למשמרת ביום הזה?
   function getWaiterAssignment(waiterId: string, dateStr: string): Assignment | null {
     return assignments.find(a => 
       a.waiter_id === waiterId && 
@@ -210,12 +436,10 @@ export default function AdminDashboard() {
     ) || null;
   }
 
-  // משמרות זמינות ביום מסוים
   function getShiftsForDate(dateStr: string): Shift[] {
     return shifts.filter(s => s.shift_date === dateStr);
   }
 
-  // שיבוץ מלצר למשמרת
   async function assignWaiter(shiftId: string) {
     if (!scheduleModal) return;
     setActionLoading(shiftId);
@@ -223,8 +447,6 @@ export default function AdminDashboard() {
     
     try {
       const supabase = createClient();
-      
-      // מציאת ה-role של המלצר
       const waiter = waiters.find(w => w.id === scheduleModal.waiterId);
       
       const { error: insertError } = await supabase
@@ -273,6 +495,8 @@ export default function AdminDashboard() {
   const avgAccuracy = totalQuizAttempts > 0 ? Math.round((totalCorrect / totalQuizAttempts) * 100) : 0;
   const totalSimulations = waiterStats.reduce((sum, w) => sum + (w.simulations_completed || 0), 0);
 
+  const completedDayShifts = dayShifts.filter(s => s.clock_out && s.hours_worked);
+
   return (
     <div dir="rtl" className="min-h-screen bg-slate-50">
       <header className="bg-white border-b border-slate-200">
@@ -283,7 +507,7 @@ export default function AdminDashboard() {
             </a>
             <div>
               <h1 className="font-semibold text-slate-900 leading-tight">דשבורד מנהל</h1>
-              <p className="text-xs text-slate-500">סקירה, זמינות ושיבוץ צוות</p>
+              <p className="text-xs text-slate-500">סקירה, זמינות, שיבוץ וחלוקת טיפים</p>
             </div>
           </div>
           <div className="flex gap-3">
@@ -334,6 +558,158 @@ export default function AdminDashboard() {
               <p className="text-2xl font-semibold text-slate-900">{totalSimulations}</p>
               <p className="text-xs text-slate-500">הושלמו</p>
             </div>
+          </div>
+        </div>
+
+        {/* ===== 💰 חלוקת טיפים יומית - חדש! ===== */}
+        <div className="bg-white rounded-xl border border-slate-200 overflow-hidden mb-6">
+          <div className="p-5 border-b border-slate-100">
+            <div className="flex items-center justify-between flex-wrap gap-3">
+              <div>
+                <h3 className="font-semibold text-slate-900">💰 חלוקת טיפים יומית</h3>
+                <p className="text-xs text-slate-500 mt-0.5">ראנרים: 50₪/שעה · מלצרים+ברמנים: יתרה לפי שעות</p>
+              </div>
+              <input
+                type="date"
+                value={tipsDate}
+                onChange={(e) => setTipsDate(e.target.value)}
+                className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
+              />
+            </div>
+          </div>
+
+          <div className="p-5">
+            {completedDayShifts.length === 0 ? (
+              <div className="text-center py-8 text-slate-500">
+                <div className="text-4xl mb-2">⏰</div>
+                <p className="text-sm">אין משמרות שהסתיימו ב-{new Date(tipsDate).toLocaleDateString('he-IL')}</p>
+                <p className="text-xs mt-1">בחר תאריך אחר או חכה שמלצרים יסיימו את המשמרת</p>
+              </div>
+            ) : (
+              <>
+                {/* טבלת מי עבד */}
+                <div className="overflow-x-auto mb-4">
+                  <table className="w-full text-sm">
+                    <thead className="bg-slate-50">
+                      <tr>
+                        <th className="text-right p-3 font-medium text-slate-700">מלצר</th>
+                        <th className="text-right p-3 font-medium text-slate-700">תפקיד</th>
+                        <th className="text-right p-3 font-medium text-slate-700">כניסה</th>
+                        <th className="text-right p-3 font-medium text-slate-700">יציאה</th>
+                        <th className="text-right p-3 font-medium text-slate-700">שעות</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {completedDayShifts.map((shift) => (
+                        <tr key={shift.clock_id} className="border-t border-slate-100">
+                          <td className="p-3 font-medium text-slate-900">{shift.full_name}</td>
+                          <td className="p-3">
+                            <span className={`text-xs px-2 py-1 rounded ${
+                              shift.role === 'runner' 
+                                ? 'bg-amber-100 text-amber-700' 
+                                : 'bg-blue-100 text-blue-700'
+                            }`}>
+                              {roleLabels[shift.role] || shift.role}
+                            </span>
+                          </td>
+                          <td className="p-3 text-slate-600">{formatTime(shift.clock_in)}</td>
+                          <td className="p-3 text-slate-600">{shift.clock_out ? formatTime(shift.clock_out) : '—'}</td>
+                          <td className="p-3 font-semibold text-slate-900">
+                            {Number(shift.hours_worked).toFixed(2)} שעות
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* שדה סכום + כפתור חישוב */}
+                <div className="flex flex-wrap items-end gap-3 p-4 bg-slate-50 rounded-xl mb-4">
+                  <div className="flex-1 min-w-[200px]">
+                    <label className="block text-xs font-medium text-slate-700 mb-1">סך הטיפים היומי (₪)</label>
+                    <input
+                      type="number"
+                      value={totalTips}
+                      onChange={(e) => setTotalTips(e.target.value)}
+                      placeholder="לדוגמה: 1500"
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
+                    />
+                  </div>
+                  <button
+                    onClick={calculateTips}
+                    className="bg-slate-900 hover:bg-slate-800 text-white font-medium px-6 py-2 rounded-lg transition"
+                  >
+                    חשב חלוקה
+                  </button>
+                </div>
+
+                {/* תוצאות */}
+                {tipResults && tipResults.length > 0 && (
+                  <div className="border-t border-slate-200 pt-4">
+                    <div className="flex justify-between items-center mb-3">
+                      <h4 className="font-semibold text-slate-900">📊 תוצאות החלוקה</h4>
+                      {!savedDistribution ? (
+                        <button
+                          onClick={saveDistribution}
+                          disabled={actionLoading === 'save-tips'}
+                          className="bg-green-600 hover:bg-green-700 disabled:bg-slate-400 text-white text-sm font-medium px-4 py-1.5 rounded-lg transition"
+                        >
+                          {actionLoading === 'save-tips' ? 'שומר...' : '💾 שמור חלוקה'}
+                        </button>
+                      ) : (
+                        <span className="text-sm text-green-600 font-medium">✅ נשמר</span>
+                      )}
+                    </div>
+
+                    <div className="space-y-2">
+                      {tipResults.map((r) => (
+                        <div key={r.waiter_id} className={`flex items-center justify-between p-3 rounded-lg ${
+                          r.is_runner ? 'bg-amber-50' : 'bg-blue-50'
+                        }`}>
+                          <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 bg-white rounded-full flex items-center justify-center text-sm font-medium border border-slate-200">
+                              {getInitials(r.full_name)}
+                            </div>
+                            <div>
+                              <p className="font-medium text-slate-900">{r.full_name}</p>
+                              <p className="text-xs text-slate-500">
+                                {roleLabels[r.role]} · {r.hours.toFixed(2)} שעות
+                                {r.is_runner && ` × ${RUNNER_RATE}₪`}
+                              </p>
+                            </div>
+                          </div>
+                          <p className="text-xl font-bold text-slate-900">
+                            ₪{r.tip_amount.toLocaleString('he-IL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* סיכום */}
+                    <div className="mt-4 p-4 bg-slate-900 text-white rounded-xl">
+                      <div className="grid grid-cols-3 gap-3 text-sm">
+                        <div>
+                          <p className="text-slate-400 text-xs">סך טיפים</p>
+                          <p className="text-lg font-bold">₪{parseFloat(totalTips).toLocaleString('he-IL')}</p>
+                        </div>
+                        <div>
+                          <p className="text-slate-400 text-xs">לראנרים</p>
+                          <p className="text-lg font-bold">
+                            ₪{tipResults.filter(r => r.is_runner).reduce((s, r) => s + r.tip_amount, 0).toLocaleString('he-IL', { minimumFractionDigits: 2 })}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-slate-400 text-xs">למלצרים+ברמנים</p>
+                          <p className="text-lg font-bold">
+                            ₪{tipResults.filter(r => !r.is_runner).reduce((s, r) => s + r.tip_amount, 0).toLocaleString('he-IL', { minimumFractionDigits: 2 })}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
           </div>
         </div>
 
