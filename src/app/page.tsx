@@ -5,6 +5,7 @@ import { redirect } from 'next/navigation';
 import { Header } from '@/components/dashboard/Header';
 import { KPICard } from '@/components/dashboard/KPICard';
 import { Card, CardHeader, CardBody } from '@/components/ui/Card';
+import { ClockInOut } from '@/components/dashboard/ClockInOut';
 
 async function createPublicServerClient() {
   const cookieStore = await cookies();
@@ -52,8 +53,28 @@ export default async function HomePage() {
     redirect('/no-access');
   }
 
-  // טעינת נתונים מה-DB
   const supabase = await createClient();
+  
+  // טעינת המלצר הנוכחי (אם רשום)
+  const { data: waiter } = await supabase
+    .from('waiters')
+    .select('id, full_name, role')
+    .eq('auth_user_id', user.id)
+    .single();
+
+  // בדיקה - האם יש משמרת פעילה כרגע?
+  let activeClock = null;
+  if (waiter) {
+    const { data } = await supabase
+      .from('shift_clock')
+      .select('id, clock_in')
+      .eq('waiter_id', waiter.id)
+      .is('clock_out', null)
+      .order('clock_in', { ascending: false })
+      .limit(1)
+      .single();
+    activeClock = data;
+  }
   
   const { data: trainings } = await supabase
     .from('trainings')
@@ -76,15 +97,28 @@ export default async function HomePage() {
       />
 
       <main className="max-w-6xl mx-auto px-6 py-8">
-        {/* Welcome banner */}
-        <div className="bg-gradient-to-l from-slate-900 to-slate-800 text-white rounded-2xl p-6 mb-6">
-          <h2 className="text-xl font-semibold mb-1">
-            {greeting}, {userName}! 👋
-          </h2>
-          <p className="text-slate-300 text-sm">
-            המשמרת מתחילה בעוד כ-47 דקות · הקוויז היומי שלך מחכה
-          </p>
-        </div>
+        {/* Clock In/Out Widget - מוצג רק אם המשתמש רשום כמלצר */}
+        {waiter && (
+          <ClockInOut
+            waiterId={waiter.id}
+            waiterName={waiter.full_name}
+            activeClockId={activeClock?.id || null}
+            activeClockStart={activeClock?.clock_in || null}
+            greeting={greeting}
+          />
+        )}
+
+        {/* Welcome banner - רק אם המשתמש לא מלצר רשום (כמו owner) */}
+        {!waiter && (
+          <div className="bg-gradient-to-l from-slate-900 to-slate-800 text-white rounded-2xl p-6 mb-6">
+            <h2 className="text-xl font-semibold mb-1">
+              {greeting}, {userName}! 👋
+            </h2>
+            <p className="text-slate-300 text-sm">
+              ברוך הבא לדשבורד המנהל
+            </p>
+          </div>
+        )}
 
         {/* KPI Cards */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
@@ -123,7 +157,7 @@ export default async function HomePage() {
                         )}
                       </div>
                       <p className="text-xs text-slate-500">
-                        {training.duration_minutes} דק' · {training.category}
+                        {training.duration_minutes} דק&apos; · {training.category}
                       </p>
                     </div>
                   </div>
