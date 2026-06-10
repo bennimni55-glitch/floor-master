@@ -79,6 +79,15 @@ interface DayShift {
   status: string;
 }
 
+interface ActiveShift {
+  shift_id: string;
+  waiter_id: string;
+  waiter_name: string;
+  role: string;
+  clock_in: string;
+  minutes_active: number;
+}
+
 interface TipResult {
   waiter_id: string;
   full_name: string;
@@ -153,7 +162,7 @@ function formatRelativeTime(dateString: string | null): string {
   if (diffHours < 24) return `לפני ${diffHours} שעות`;
   if (diffDays === 1) return 'אתמול';
   if (diffDays < 7) return `לפני ${diffDays} ימים`;
-  return date.toLocaleDateString('he-IL', { timeZone: 'Asia/Jerusalem' });
+  return date.toLocaleDateString('he-IL');
 }
 
 function getInitials(name: string): string {
@@ -164,7 +173,7 @@ function getInitials(name: string): string {
 
 function formatTime(timeStr: string): string {
   const date = new Date(timeStr);
-  return date.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jerusalem' });
+  return date.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' });
 }
 
 export default function AdminDashboard() {
@@ -191,6 +200,7 @@ export default function AdminDashboard() {
   const [totalTips, setTotalTips] = useState<string>('');
   const [tipResults, setTipResults] = useState<TipResult[] | null>(null);
   const [savedDistribution, setSavedDistribution] = useState<boolean>(false);
+  const [activeShifts, setActiveShifts] = useState<ActiveShift[]>([]);
 
   useEffect(() => {
     loadData();
@@ -206,13 +216,17 @@ export default function AdminDashboard() {
       const supabase = createClient();
       const today = new Date().toISOString().split('T')[0];
 
-      const [statsRes, categoriesRes, availabilityRes, assignmentsRes, shiftsRes, waitersRes] = await Promise.all([
+      const [statsRes, categoriesRes, availabilityRes, assignmentsRes, shiftsRes, waitersRes, activeShiftsRes] = await Promise.all([
         supabase.from('admin_dashboard_stats').select('*').order('rank'),
         supabase.from('category_weakness').select('*').limit(5),
         supabase.from('weekly_availability').select('*'),
         supabase.from('waiter_assignments').select('*'),
         supabase.from('shifts').select('*').gte('shift_date', today).order('shift_date'),
         supabase.from('waiters').select('id, full_name, role').eq('is_active', true).order('full_name'),
+        supabase.from('shift_clock')
+          .select('id, waiter_id, clock_in, waiters!inner(full_name, role)')
+          .is('clock_out', null)
+          .order('clock_in', { ascending: false }),
       ]);
 
       setWaiterStats((statsRes.data || []) as WaiterStat[]);
@@ -221,6 +235,23 @@ export default function AdminDashboard() {
       setAssignments((assignmentsRes.data || []) as Assignment[]);
       setShifts((shiftsRes.data || []) as Shift[]);
       setWaiters((waitersRes.data || []) as Waiter[]);
+
+      // עיבוד משמרות פעילות
+      const now = new Date();
+      const activeData: ActiveShift[] = (activeShiftsRes.data || []).map((s: { id: string; waiter_id: string; clock_in: string; waiters: { full_name: string; role: string } | { full_name: string; role: string }[] }) => {
+        const clockIn = new Date(s.clock_in);
+        const minutes = Math.floor((now.getTime() - clockIn.getTime()) / 60000);
+        const waiter = Array.isArray(s.waiters) ? s.waiters[0] : s.waiters;
+        return {
+          shift_id: s.id,
+          waiter_id: s.waiter_id,
+          waiter_name: waiter?.full_name || 'לא ידוע',
+          role: waiter?.role || 'waiter',
+          clock_in: s.clock_in,
+          minutes_active: minutes,
+        };
+      });
+      setActiveShifts(activeData);
     } catch (err) {
       console.error(err);
       setError('שגיאה בטעינה');
@@ -440,6 +471,54 @@ export default function AdminDashboard() {
     return shifts.filter(s => s.shift_date === dateStr);
   }
 
+  async function manualClockOut(shiftId: string, waiterName: string) {
+    if (!confirm(`לסגור את המשמרת של ${waiterName}?\n\nהשעה הנוכחית תרשם כשעת הסיום.`)) return;
+    
+    setActionLoading(shiftId);
+    setError(null);
+    
+    try {
+      const supabase = createClient();
+      const now = new Date();
+      
+      // קודם נשלוף את clock_in כדי לחשב hours_worked
+      const { data: shiftData, error: fetchError } = await supabase
+        .from('shift_clock')
+        .select('clock_in')
+        .eq('id', shiftId)
+        .single();
+      
+      if (fetchError || !shiftData) throw new Error('לא נמצאה משמרת');
+      
+      const clockIn = new Date(shiftData.clock_in);
+      const hoursWorked = Number(((now.getTime() - clockIn.getTime()) / 3600000).toFixed(2));
+      
+      const { error: updateError } = await supabase
+        .from('shift_clock')
+        .update({
+          clock_out: now.toISOString(),
+          hours_worked: hoursWorked,
+        })
+        .eq('id', shiftId);
+      
+      if (updateError) throw updateError;
+      
+      await loadData();
+    } catch (err: unknown) {
+      const e = err as { message?: string };
+      setError(e.message || 'שגיאה בסגירת משמרת');
+    } finally {
+      setActionLoading(null);
+    }
+  }
+
+  function formatActiveTime(minutes: number): string {
+    if (minutes < 60) return `${minutes} דק׳`;
+    const hours = Math.floor(minutes / 60);
+    const mins = minutes % 60;
+    return `${hours}:${mins.toString().padStart(2, '0')} שעות`;
+  }
+
   async function assignWaiter(shiftId: string) {
     if (!scheduleModal) return;
     setActionLoading(shiftId);
@@ -566,6 +645,89 @@ export default function AdminDashboard() {
           </div>
         </div>
 
+        {/* ===== 🟢 מי במשמרת עכשיו ===== */}
+        <div className={`bg-white rounded-xl border overflow-hidden mb-6 ${activeShifts.length > 0 ? 'border-green-300 shadow-sm' : 'border-slate-200'}`}>
+          <div className="p-5 border-b border-slate-100">
+            <div className="flex items-center justify-between flex-wrap gap-3">
+              <div className="flex items-center gap-3">
+                {activeShifts.length > 0 && (
+                  <span className="relative flex h-3 w-3">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-3 w-3 bg-green-500"></span>
+                  </span>
+                )}
+                <div>
+                  <h3 className="font-semibold text-slate-900">
+                    🟢 במשמרת עכשיו ({activeShifts.length})
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    {activeShifts.length === 0 
+                      ? 'אין מלצרים במשמרת ברגע זה' 
+                      : 'מלצרים שלחצו "התחל משמרת" ועדיין לא סיימו'}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={loadData}
+                className="text-xs text-slate-600 hover:text-slate-900 px-3 py-1.5 border border-slate-200 rounded-md hover:bg-slate-50 transition"
+              >
+                ↻ רענן
+              </button>
+            </div>
+          </div>
+
+          {activeShifts.length === 0 ? (
+            <div className="p-10 text-center text-slate-400">
+              <div className="text-4xl mb-2">😴</div>
+              <p className="text-sm">אף אחד לא במשמרת כרגע</p>
+            </div>
+          ) : (
+            <div className="divide-y divide-slate-100">
+              {activeShifts.map((shift) => {
+                const isLong = shift.minutes_active > 480; // יותר מ-8 שעות
+                return (
+                  <div key={shift.shift_id} className="p-4 flex items-center justify-between flex-wrap gap-3">
+                    <div className="flex items-center gap-3 flex-1 min-w-0">
+                      <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center text-green-700 font-semibold">
+                        {shift.waiter_name.charAt(0)}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <p className="font-medium text-slate-900">{shift.waiter_name}</p>
+                          <span className={`text-xs px-2 py-0.5 rounded ${
+                            shift.role === 'bartender' ? 'bg-purple-100 text-purple-700' :
+                            shift.role === 'runner' ? 'bg-amber-100 text-amber-700' :
+                            'bg-blue-100 text-blue-700'
+                          }`}>
+                            {shift.role === 'bartender' ? 'ברמן/ית' : 
+                             shift.role === 'runner' ? 'ראנר/ית' : 'מלצר/ית'}
+                          </span>
+                          {isLong && (
+                            <span className="text-xs px-2 py-0.5 rounded bg-red-100 text-red-700">
+                              ⚠️ משמרת ארוכה
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-slate-500 mt-0.5">
+                          התחיל ב-{new Date(shift.clock_in).toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jerusalem' })} · 
+                          <span className="font-medium text-green-700"> {formatActiveTime(shift.minutes_active)}</span>
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => manualClockOut(shift.shift_id, shift.waiter_name)}
+                      disabled={actionLoading === shift.shift_id}
+                      className="text-sm bg-red-50 text-red-700 hover:bg-red-100 px-3 py-1.5 rounded-md transition border border-red-200 disabled:opacity-50"
+                    >
+                      {actionLoading === shift.shift_id ? '...' : '🚪 סגור משמרת'}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
         {/* ===== 💰 חלוקת טיפים יומית - חדש! ===== */}
         <div className="bg-white rounded-xl border border-slate-200 overflow-hidden mb-6">
           <div className="p-5 border-b border-slate-100">
@@ -587,7 +749,7 @@ export default function AdminDashboard() {
             {completedDayShifts.length === 0 ? (
               <div className="text-center py-8 text-slate-500">
                 <div className="text-4xl mb-2">⏰</div>
-                <p className="text-sm">אין משמרות שהסתיימו ב-{new Date(tipsDate).toLocaleDateString('he-IL', { timeZone: 'Asia/Jerusalem' })}</p>
+                <p className="text-sm">אין משמרות שהסתיימו ב-{new Date(tipsDate).toLocaleDateString('he-IL')}</p>
                 <p className="text-xs mt-1">בחר תאריך אחר או חכה שמלצרים יסיימו את המשמרת</p>
               </div>
             ) : (
@@ -946,7 +1108,7 @@ export default function AdminDashboard() {
               <div>
                 <h3 className="font-semibold text-slate-900">שיבוץ למשמרת</h3>
                 <p className="text-sm text-slate-500 mt-0.5">
-                  {scheduleModal.waiterName} · {new Date(scheduleModal.date).toLocaleDateString('he-IL', { timeZone: 'Asia/Jerusalem' })}
+                  {scheduleModal.waiterName} · {new Date(scheduleModal.date).toLocaleDateString('he-IL')}
                 </p>
               </div>
               <button onClick={() => setScheduleModal(null)} className="text-slate-400 hover:text-slate-600 text-2xl leading-none">
