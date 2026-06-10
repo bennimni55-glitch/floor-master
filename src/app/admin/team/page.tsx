@@ -57,7 +57,7 @@ function formatRelativeTime(dateString: string | null): string {
   if (diffHours < 24) return `✅ לפני ${diffHours} שעות`;
   if (diffDays === 1) return '✅ אתמול';
   if (diffDays < 7) return `✅ לפני ${diffDays} ימים`;
-  return `✅ ${date.toLocaleDateString('he-IL')}`;
+  return `✅ ${date.toLocaleDateString('he-IL', { timeZone: 'Asia/Jerusalem' })}`;
 }
 
 export default function AdminTeamPage() {

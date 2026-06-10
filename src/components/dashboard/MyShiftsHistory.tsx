@@ -30,7 +30,7 @@ function formatDate(dateStr: string): string {
 
 function formatTime(timeStr: string): string {
   const date = new Date(timeStr);
-  return date.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' });
+  return date.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jerusalem' });
 }
 
 function formatHours(hours: number): string {

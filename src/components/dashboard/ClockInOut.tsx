@@ -13,7 +13,7 @@ interface ClockInOutProps {
 }
 
 function formatTime(date: Date): string {
-  return date.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' });
+  return date.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jerusalem' });
 }
 
 function calculateDuration(start: Date, end: Date): { hours: number; minutes: number; seconds: number; totalSeconds: number } {
@@ -133,7 +133,7 @@ export function ClockInOut({ waiterId, waiterName, activeClockId, activeClockSta
               {greeting}, {waiterName}! 👋
             </h2>
             <p className="text-slate-300 text-sm">
-              {currentTime.toLocaleDateString('he-IL', { weekday: 'long', day: 'numeric', month: 'long' })} · {formatTime(currentTime)}
+              {currentTime.toLocaleDateString('he-IL', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'Asia/Jerusalem' })} · {formatTime(currentTime)}
             </p>
           </div>
           <button

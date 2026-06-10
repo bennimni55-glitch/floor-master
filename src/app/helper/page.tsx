@@ -178,7 +178,7 @@ export default function HelperPage() {
                         {item.question}
                       </p>
                       <p className="text-xs text-slate-500 mt-0.5">
-                        {item.timestamp.toLocaleTimeString('he-IL', {
+                        {item.timestamp.toLocaleTimeString('he-IL', { timeZone: 'Asia/Jerusalem',
                           hour: '2-digit',
                           minute: '2-digit',
                         })}

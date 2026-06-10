@@ -153,7 +153,7 @@ function formatRelativeTime(dateString: string | null): string {
   if (diffHours < 24) return `לפני ${diffHours} שעות`;
   if (diffDays === 1) return 'אתמול';
   if (diffDays < 7) return `לפני ${diffDays} ימים`;
-  return date.toLocaleDateString('he-IL');
+  return date.toLocaleDateString('he-IL', { timeZone: 'Asia/Jerusalem' });
 }
 
 function getInitials(name: string): string {
@@ -164,7 +164,7 @@ function getInitials(name: string): string {
 
 function formatTime(timeStr: string): string {
   const date = new Date(timeStr);
-  return date.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' });
+  return date.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jerusalem' });
 }
 
 export default function AdminDashboard() {
@@ -587,7 +587,7 @@ export default function AdminDashboard() {
             {completedDayShifts.length === 0 ? (
               <div className="text-center py-8 text-slate-500">
                 <div className="text-4xl mb-2">⏰</div>
-                <p className="text-sm">אין משמרות שהסתיימו ב-{new Date(tipsDate).toLocaleDateString('he-IL')}</p>
+                <p className="text-sm">אין משמרות שהסתיימו ב-{new Date(tipsDate).toLocaleDateString('he-IL', { timeZone: 'Asia/Jerusalem' })}</p>
                 <p className="text-xs mt-1">בחר תאריך אחר או חכה שמלצרים יסיימו את המשמרת</p>
               </div>
             ) : (
@@ -946,7 +946,7 @@ export default function AdminDashboard() {
               <div>
                 <h3 className="font-semibold text-slate-900">שיבוץ למשמרת</h3>
                 <p className="text-sm text-slate-500 mt-0.5">
-                  {scheduleModal.waiterName} · {new Date(scheduleModal.date).toLocaleDateString('he-IL')}
+                  {scheduleModal.waiterName} · {new Date(scheduleModal.date).toLocaleDateString('he-IL', { timeZone: 'Asia/Jerusalem' })}
                 </p>
               </div>
               <button onClick={() => setScheduleModal(null)} className="text-slate-400 hover:text-slate-600 text-2xl leading-none">
