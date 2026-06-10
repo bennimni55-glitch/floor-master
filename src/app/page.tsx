@@ -59,12 +59,18 @@ export default async function HomePage() {
   
   const { data: waiter } = await supabase
     .from('waiters')
-    .select('id, full_name, role')
+    .select('id, full_name, role, total_points')
     .eq('auth_user_id', user.id)
     .single();
 
   let activeClock = null;
+  let simulationCount = 0;
+  let quizAccuracy = 0;
+  let waiterRank = 0;
+  let totalWaiters = 0;
+  
   if (waiter) {
+    // משמרת פעילה
     const { data } = await supabase
       .from('shift_clock')
       .select('id, clock_in')
@@ -74,6 +80,37 @@ export default async function HomePage() {
       .limit(1)
       .single();
     activeClock = data;
+
+    // סטטיסטיקות אמיתיות
+    const { count: simCount } = await supabase
+      .from('simulator_sessions')
+      .select('*', { count: 'exact', head: true })
+      .eq('waiter_id', waiter.id);
+    simulationCount = simCount || 0;
+
+    // דיוק קוויז
+    const { data: quizData } = await supabase
+      .from('quiz_attempts')
+      .select('is_correct')
+      .eq('waiter_id', waiter.id);
+    
+    if (quizData && quizData.length > 0) {
+      const correct = quizData.filter(q => q.is_correct).length;
+      quizAccuracy = Math.round((correct / quizData.length) * 100);
+    }
+
+    // דירוג
+    const { data: allWaiters } = await supabase
+      .from('waiters')
+      .select('id, total_points')
+      .eq('is_active', true)
+      .order('total_points', { ascending: false });
+    
+    if (allWaiters) {
+      totalWaiters = allWaiters.length;
+      const rankIndex = allWaiters.findIndex(w => w.id === waiter.id);
+      waiterRank = rankIndex + 1;
+    }
   }
   
   const { data: trainings } = await supabase
@@ -86,6 +123,7 @@ export default async function HomePage() {
   const initials = getInitials(user.email || '');
   const greeting = getGreeting();
   const isAdmin = access.is_floor_master_admin || false;
+  const totalPoints = waiter?.total_points || 0;
 
   return (
     <div dir="rtl" className="min-h-screen bg-slate-50">
@@ -97,7 +135,6 @@ export default async function HomePage() {
       />
 
       <main className="max-w-6xl mx-auto px-6 py-8">
-        {/* Clock In/Out Widget */}
         {waiter && (
           <ClockInOut
             waiterId={waiter.id}
@@ -119,21 +156,38 @@ export default async function HomePage() {
           </div>
         )}
 
-        {/* 💡 תזכורת היום - חדש! */}
         {waiter && <DailyReminder context="home_page" />}
 
-        {/* היסטוריית משמרות + טיפים - רק למלצרים */}
         {waiter && (
           <MyShiftsHistory waiterId={waiter.id} />
         )}
 
-        {/* KPI Cards */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
-          <KPICard label="ניקוד החודש" value="847" trend="up" trendValue="+12%" />
-          <KPICard label="מקום בדירוג" value="#2" trend="up" trendValue="עלית" />
-          <KPICard label="סימולציות" value="12" trend="neutral" />
-          <KPICard label="דיוק קוויז" value="94%" trend="up" trendValue="+3%" />
-        </div>
+        {/* KPI Cards - עכשיו עם נתונים אמיתיים! */}
+        {waiter && (
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+            <KPICard 
+              label="הניקוד שלי" 
+              value={totalPoints.toLocaleString('he-IL')} 
+              trend="neutral" 
+            />
+            <KPICard 
+              label="מקום בדירוג" 
+              value={waiterRank > 0 ? `#${waiterRank}` : '—'} 
+              trend="neutral"
+              trendValue={totalWaiters > 0 ? `מתוך ${totalWaiters}` : ''}
+            />
+            <KPICard 
+              label="סימולציות" 
+              value={simulationCount.toString()} 
+              trend="neutral" 
+            />
+            <KPICard 
+              label="דיוק קוויז" 
+              value={quizAccuracy > 0 ? `${quizAccuracy}%` : '—'} 
+              trend="neutral" 
+            />
+          </div>
+        )}
 
         {/* Active Trainings */}
         <Card className="mb-6">
