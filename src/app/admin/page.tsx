@@ -510,12 +510,17 @@ export default function AdminDashboard() {
               <p className="text-xs text-slate-500">סקירה, זמינות, שיבוץ וחלוקת טיפים</p>
             </div>
           </div>
-          <div className="flex gap-3">
-            <a href="/admin/shifts" className="text-sm text-slate-500 hover:text-slate-900">
+          <div className="flex gap-2 items-center">
+            <a 
+              href="/admin/team" 
+              className="text-sm font-medium bg-slate-900 text-white hover:bg-slate-800 px-3 py-1.5 rounded-lg transition flex items-center gap-1.5"
+            >
+              👥 מצב הצוות
+            </a>
+            <a href="/admin/shifts" className="text-sm text-slate-500 hover:text-slate-900 px-2">
               ניהול משמרות
             </a>
-            <span className="text-slate-300">·</span>
-            <a href="/" className="text-sm text-slate-500 hover:text-slate-900">
+            <a href="/" className="text-sm text-slate-500 hover:text-slate-900 px-2">
               ← בית
             </a>
           </div>
