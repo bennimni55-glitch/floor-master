@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { createClient } from '@/lib/supabase/client';
+import { DailyReminder } from './DailyReminder';
 
 interface ClockInOutProps {
   waiterId: string;
@@ -36,10 +37,8 @@ export function ClockInOut({ waiterId, waiterName, activeClockId, activeClockSta
 
   const isWorking = !!clockId && !!clockStart;
 
-  // טיימר חי - רץ כל שנייה כשבמשמרת
   useEffect(() => {
     if (isWorking) {
-      // מתחילים מיד
       setCurrentTime(new Date());
       intervalRef.current = setInterval(() => {
         setCurrentTime(new Date());
@@ -78,7 +77,6 @@ export function ClockInOut({ waiterId, waiterName, activeClockId, activeClockSta
 
       if (insertError) throw insertError;
       
-      // משתמשים בזמן המקומי (now) ולא בזמן מהשרת - כדי שלא יהיו בעיות אזור זמן
       setClockId(data.id);
       setClockStart(now);
     } catch (err: unknown) {
@@ -160,7 +158,7 @@ export function ClockInOut({ waiterId, waiterName, activeClockId, activeClockSta
     );
   }
 
-  // מצב 2: במשמרת (טיימר חי)
+  // מצב 2: במשמרת (טיימר חי + תזכורת)
   const duration = clockStart ? calculateDuration(clockStart, currentTime) : { hours: 0, minutes: 0, seconds: 0, totalSeconds: 0 };
 
   return (
@@ -202,6 +200,9 @@ export function ClockInOut({ waiterId, waiterName, activeClockId, activeClockSta
           )}
         </button>
       </div>
+      
+      {/* 💡 תזכורת חדש! */}
+      <DailyReminder context="during_shift" compact={true} />
       
       {error && (
         <div className="mt-3 bg-red-500/30 border border-red-300 text-red-50 text-sm rounded-lg px-4 py-2">

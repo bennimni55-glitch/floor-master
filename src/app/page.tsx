@@ -7,6 +7,7 @@ import { KPICard } from '@/components/dashboard/KPICard';
 import { Card, CardHeader, CardBody } from '@/components/ui/Card';
 import { ClockInOut } from '@/components/dashboard/ClockInOut';
 import { MyShiftsHistory } from '@/components/dashboard/MyShiftsHistory';
+import { DailyReminder } from '@/components/dashboard/DailyReminder';
 
 async function createPublicServerClient() {
   const cookieStore = await cookies();
@@ -56,14 +57,12 @@ export default async function HomePage() {
 
   const supabase = await createClient();
   
-  // טעינת המלצר הנוכחי
   const { data: waiter } = await supabase
     .from('waiters')
     .select('id, full_name, role')
     .eq('auth_user_id', user.id)
     .single();
 
-  // בדיקה - האם יש משמרת פעילה כרגע?
   let activeClock = null;
   if (waiter) {
     const { data } = await supabase
@@ -120,6 +119,9 @@ export default async function HomePage() {
           </div>
         )}
 
+        {/* 💡 תזכורת היום - חדש! */}
+        {waiter && <DailyReminder context="home_page" />}
+
         {/* היסטוריית משמרות + טיפים - רק למלצרים */}
         {waiter && (
           <MyShiftsHistory waiterId={waiter.id} />
@@ -166,9 +168,9 @@ export default async function HomePage() {
                       </p>
                     </div>
                   </div>
-                  <button className="text-xs text-slate-600 hover:text-slate-900 font-medium px-3 py-1.5 border border-slate-200 rounded-md hover:bg-white transition">
+                  <a href="/training" className="text-xs text-slate-600 hover:text-slate-900 font-medium px-3 py-1.5 border border-slate-200 rounded-md hover:bg-white transition">
                     התחל
-                  </button>
+                  </a>
                 </div>
               ))}
             </div>
