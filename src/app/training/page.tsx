@@ -116,7 +116,7 @@ export default async function TrainingPage() {
             </a>
             <div>
               <h1 className="font-semibold text-slate-900 leading-tight">ספר ההדרכה</h1>
-              <p className="text-xs text-slate-500">כל מה שצריך לדעת להיות מלצר ב-Hopa</p>
+              <p className="text-xs text-slate-500">כל מה שצריך לדעת להיות מלצר ב-jome</p>
             </div>
           </div>
           <a href="/" className="text-sm text-slate-500 hover:text-slate-900">
