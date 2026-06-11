@@ -84,7 +84,7 @@ export default async function HomePage() {
 
     // סטטיסטיקות אמיתיות
     const { count: simCount } = await supabase
-      .from('simulator_sessions')
+      .from('simulation_sessions')
       .select('*', { count: 'exact', head: true })
       .eq('waiter_id', waiter.id);
     simulationCount = simCount || 0;
