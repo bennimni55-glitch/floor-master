@@ -8,6 +8,7 @@ import { Card, CardHeader, CardBody } from '@/components/ui/Card';
 import { ClockInOut } from '@/components/dashboard/ClockInOut';
 import { MyShiftsHistory } from '@/components/dashboard/MyShiftsHistory';
 import { DailyReminder } from '@/components/dashboard/DailyReminder';
+import { TipsConfirmation } from '@/components/dashboard/TipsConfirmation';
 
 async function createPublicServerClient() {
   const cookieStore = await cookies();
@@ -157,6 +158,8 @@ export default async function HomePage() {
         )}
 
         {waiter && <DailyReminder context="home_page" />}
+
+        {waiter && <TipsConfirmation waiterId={waiter.id} />}
 
         {waiter && (
           <MyShiftsHistory waiterId={waiter.id} />

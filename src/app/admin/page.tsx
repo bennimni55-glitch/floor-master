@@ -95,6 +95,7 @@ interface TipResult {
   hours: number;
   tip_amount: number;
   is_runner: boolean;
+  confirmed_at?: string | null;
 }
 
 const RUNNER_RATE = 50;
@@ -295,17 +296,18 @@ export default function AdminDashboard() {
       const supabase = createClient();
       const { data } = await supabase
         .from('tip_distribution_details')
-        .select('waiter_id, role, hours_worked, tip_amount, waiters(full_name)')
+        .select('waiter_id, role, hours_worked, tip_amount, confirmed_at, waiters(full_name)')
         .eq('distribution_id', distributionId);
       
       if (data && data.length > 0) {
-        const results: TipResult[] = data.map((d: { waiter_id: string; role: string; hours_worked: number; tip_amount: number; waiters: { full_name: string } | { full_name: string }[] }) => ({
+        const results: TipResult[] = data.map((d: { waiter_id: string; role: string; hours_worked: number; tip_amount: number; confirmed_at: string | null; waiters: { full_name: string } | { full_name: string }[] }) => ({
           waiter_id: d.waiter_id,
           full_name: Array.isArray(d.waiters) ? d.waiters[0]?.full_name : d.waiters?.full_name || 'לא ידוע',
           role: d.role,
           hours: Number(d.hours_worked),
           tip_amount: Number(d.tip_amount),
           is_runner: d.role === 'runner',
+          confirmed_at: d.confirmed_at,
         }));
         setTipResults(results);
         setSavedDistribution(true);
@@ -845,9 +847,22 @@ export default function AdminDashboard() {
                               </p>
                             </div>
                           </div>
-                          <p className="text-xl font-bold text-slate-900">
-                            ₪{r.tip_amount.toLocaleString('he-IL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                          </p>
+                          <div className="flex items-center gap-3">
+                            <p className="text-xl font-bold text-slate-900">
+                              ₪{r.tip_amount.toLocaleString('he-IL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </p>
+                            {savedDistribution && (
+                              r.confirmed_at ? (
+                                <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded-md whitespace-nowrap">
+                                  ✅ אושר {new Date(r.confirmed_at).toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jerusalem' })}
+                                </span>
+                              ) : (
+                                <span className="text-xs bg-amber-100 text-amber-700 px-2 py-1 rounded-md whitespace-nowrap">
+                                  🟡 ממתין
+                                </span>
+                              )
+                            )}
+                          </div>
                         </div>
                       ))}
                     </div>
