@@ -404,39 +404,9 @@ export default function ShiftsPage() {
                     />
                   </div>
 
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      id="all_day"
-                      checked={newConstraint.all_day}
-                      onChange={(e) => setNewConstraint({ ...newConstraint, all_day: e.target.checked })}
-                      className="rounded"
-                    />
-                    <label htmlFor="all_day" className="text-sm text-slate-700">לא יכול/ה כל היום</label>
+                  <div className="bg-rose-50 border border-rose-200 rounded-lg p-3 text-sm text-rose-700">
+                    סימון תאריך = לא יכול/ה לעבוד באותו יום (כל היום)
                   </div>
-
-                  {!newConstraint.all_day && (
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <label className="block text-xs font-medium text-slate-700 mb-1">משעה</label>
-                        <input
-                          type="time"
-                          value={newConstraint.start_time}
-                          onChange={(e) => setNewConstraint({ ...newConstraint, start_time: e.target.value })}
-                          className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-medium text-slate-700 mb-1">עד שעה</label>
-                        <input
-                          type="time"
-                          value={newConstraint.end_time}
-                          onChange={(e) => setNewConstraint({ ...newConstraint, end_time: e.target.value })}
-                          className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
-                        />
-                      </div>
-                    </div>
-                  )}
 
                   <div>
                     <label className="block text-xs font-medium text-slate-700 mb-1">סיבה (אופציונלי)</label>
