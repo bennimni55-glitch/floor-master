@@ -598,6 +598,12 @@ export default function AdminDashboard() {
             >
               👥 מצב הצוות
             </a>
+            <a 
+              href="/admin/training" 
+              className="text-sm font-medium bg-rose-700 text-white hover:bg-rose-800 px-3 py-1.5 rounded-lg transition flex items-center gap-1.5"
+            >
+              📚 מעקב הדרכות
+            </a>
             <a href="/admin/shifts" className="text-sm text-slate-500 hover:text-slate-900 px-2">
               ניהול משמרות
             </a>
