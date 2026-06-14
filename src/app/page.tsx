@@ -9,6 +9,7 @@ import { ClockInOut } from '@/components/dashboard/ClockInOut';
 import { MyShiftsHistory } from '@/components/dashboard/MyShiftsHistory';
 import { DailyReminder } from '@/components/dashboard/DailyReminder';
 import { TipsConfirmation } from '@/components/dashboard/TipsConfirmation';
+import { WeeklyTrainingBanner } from '@/components/dashboard/WeeklyTrainingBanner';
 
 async function createPublicServerClient() {
   const cookieStore = await cookies();
@@ -158,6 +159,8 @@ export default async function HomePage() {
         )}
 
         {waiter && <DailyReminder context="home_page" />}
+
+        {waiter && <WeeklyTrainingBanner waiterId={waiter.id} />}
 
         {waiter && <TipsConfirmation waiterId={waiter.id} />}
 
