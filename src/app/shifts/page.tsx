@@ -55,7 +55,8 @@ function formatTime(timeStr: string): string {
 }
 
 export default function ShiftsPage() {
-  const [activeTab, setActiveTab] = useState<'shifts' | 'constraints'>('shifts');
+  const [activeTab, setActiveTab] = useState<'roster' | 'shifts' | 'constraints'>('roster');
+  const [myRoster, setMyRoster] = useState<{ roster_date: string }[]>([]);
   
   const [shifts, setShifts] = useState<Shift[]>([]);
   const [constraints, setConstraints] = useState<Constraint[]>([]);
@@ -94,6 +95,30 @@ export default function ShiftsPage() {
 
       setShifts((shiftsRes.data || []) as Shift[]);
       setConstraints((constraintsRes.data || []) as Constraint[]);
+
+      // טעינת השיבוצים שלי (daily_roster) מהיום והלאה
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          const { data: waiterRow } = await supabase
+            .from('waiters')
+            .select('id')
+            .eq('auth_user_id', user.id)
+            .single();
+          if (waiterRow) {
+            const today = new Date().toISOString().split('T')[0];
+            const { data: rosterRows } = await supabase
+              .from('daily_roster')
+              .select('roster_date')
+              .eq('waiter_id', waiterRow.id)
+              .gte('roster_date', today)
+              .order('roster_date', { ascending: true });
+            setMyRoster(rosterRows || []);
+          }
+        }
+      } catch (e) {
+        console.error('roster load error', e);
+      }
     } catch (err) {
       console.error(err);
       setError('שגיאה בטעינה');
@@ -221,6 +246,16 @@ export default function ShiftsPage() {
         <div className="max-w-3xl mx-auto px-6">
           <div className="flex gap-1 border-b border-slate-100">
             <button
+              onClick={() => setActiveTab('roster')}
+              className={`px-4 py-3 text-sm font-medium transition border-b-2 ${
+                activeTab === 'roster'
+                  ? 'text-slate-900 border-slate-900'
+                  : 'text-slate-500 border-transparent hover:text-slate-700'
+              }`}
+            >
+              📋 המשמרות שלי {myRoster.length > 0 && `(${myRoster.length})`}
+            </button>
+            <button
               onClick={() => setActiveTab('shifts')}
               className={`px-4 py-3 text-sm font-medium transition border-b-2 ${
                 activeTab === 'shifts'
@@ -249,6 +284,45 @@ export default function ShiftsPage() {
           <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3 mb-4">
             {error}
           </div>
+        )}
+
+        {/* Tab: My Roster */}
+        {activeTab === 'roster' && (
+          <>
+            <div className="mb-4">
+              <h2 className="text-lg font-bold text-slate-900">📋 המשמרות שלי</h2>
+              <p className="text-sm text-slate-500">הימים שבהם שובצת לעבודה</p>
+            </div>
+            {myRoster.length === 0 ? (
+              <div className="bg-slate-100 border-2 border-dashed border-slate-300 rounded-2xl p-10 text-center">
+                <div className="text-4xl mb-3">📅</div>
+                <p className="text-sm text-slate-600">עדיין לא שובצת למשמרות</p>
+                <p className="text-xs text-slate-500 mt-1">המנהל ישבץ אותך לפי הזמינות שלך</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {myRoster.map((r) => {
+                  const d = new Date(r.roster_date + 'T00:00:00');
+                  const days = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'];
+                  return (
+                    <div key={r.roster_date} className="bg-white border-2 border-green-200 rounded-2xl p-5 shadow-sm flex items-center justify-between">
+                      <div>
+                        <div className="text-lg font-bold text-slate-900">
+                          יום {days[d.getDay()]}
+                        </div>
+                        <div className="text-sm text-slate-500">
+                          {d.getDate()}/{d.getMonth() + 1}/{d.getFullYear()}
+                        </div>
+                      </div>
+                      <div className="bg-green-100 text-green-700 text-sm font-bold px-4 py-2 rounded-full">
+                        ✅ משובץ
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </>
         )}
 
         {/* Tab: Shifts */}
