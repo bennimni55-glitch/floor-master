@@ -56,7 +56,7 @@ function formatTime(timeStr: string): string {
 
 export default function ShiftsPage() {
   const [activeTab, setActiveTab] = useState<'roster' | 'shifts' | 'constraints'>('roster');
-  const [myRoster, setMyRoster] = useState<{ roster_date: string }[]>([]);
+  const [myRoster, setMyRoster] = useState<{ roster_date: string; is_opening: boolean; is_closing: boolean }[]>([]);
   
   const [shifts, setShifts] = useState<Shift[]>([]);
   const [constraints, setConstraints] = useState<Constraint[]>([]);
@@ -109,7 +109,7 @@ export default function ShiftsPage() {
             const today = new Date().toISOString().split('T')[0];
             const { data: rosterRows } = await supabase
               .from('daily_roster')
-              .select('roster_date')
+              .select('roster_date, is_opening, is_closing')
               .eq('waiter_id', waiterRow.id)
               .gte('roster_date', today)
               .order('roster_date', { ascending: true });
@@ -314,8 +314,20 @@ export default function ShiftsPage() {
                           {d.getDate()}/{d.getMonth() + 1}/{d.getFullYear()}
                         </div>
                       </div>
-                      <div className="bg-green-100 text-green-700 text-sm font-bold px-4 py-2 rounded-full">
-                        ✅ משובץ
+                      <div className="flex flex-col items-end gap-1">
+                        <div className="bg-green-100 text-green-700 text-sm font-bold px-4 py-2 rounded-full">
+                          ✅ משובץ
+                        </div>
+                        {r.is_opening && (
+                          <div className="bg-amber-100 text-amber-700 text-xs font-bold px-3 py-1 rounded-full">
+                            🌅 פתיחה
+                          </div>
+                        )}
+                        {r.is_closing && (
+                          <div className="bg-indigo-100 text-indigo-700 text-xs font-bold px-3 py-1 rounded-full">
+                            🌙 סגירה
+                          </div>
+                        )}
                       </div>
                     </div>
                   );

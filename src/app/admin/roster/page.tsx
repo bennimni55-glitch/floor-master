@@ -10,6 +10,11 @@ interface Waiter {
   role: string;
 }
 
+interface RosterEntry {
+  is_opening: boolean;
+  is_closing: boolean;
+}
+
 const roleLabels: Record<string, string> = {
   waiter: 'מלצר/ית',
   bartender: 'ברמן/ית',
@@ -19,7 +24,6 @@ const roleLabels: Record<string, string> = {
 
 const DAYS_HE = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'];
 
-// תאריך יום ראשון של השבוע הנוכחי (שעון ישראל)
 function getWeekStart(): Date {
   const now = new Date();
   const il = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Jerusalem' }));
@@ -39,15 +43,13 @@ function toDateStr(d: Date): string {
 export default function AdminRosterPage() {
   const [loading, setLoading] = useState(true);
   const [waiters, setWaiters] = useState<Waiter[]>([]);
-  // constraintsByDate[dateStr] = Set<waiter_id> שחסמו את היום
   const [constraints, setConstraints] = useState<Record<string, Set<string>>>({});
-  // rosterByDate[dateStr] = Set<waiter_id> שמשובצים
-  const [roster, setRoster] = useState<Record<string, Set<string>>>({});
+  // roster[dateStr][waiterId] = { is_opening, is_closing }
+  const [roster, setRoster] = useState<Record<string, Record<string, RosterEntry>>>({});
   const [weekStart] = useState<Date>(getWeekStart());
   const [selectedDay, setSelectedDay] = useState<number>(new Date().getDay());
   const [saving, setSaving] = useState<string | null>(null);
 
-  // 7 ימי השבוע כתאריכים
   const weekDates = Array.from({ length: 7 }, (_, i) => {
     const d = new Date(weekStart);
     d.setDate(weekStart.getDate() + i);
@@ -59,7 +61,6 @@ export default function AdminRosterPage() {
     const startStr = toDateStr(weekDates[0]);
     const endStr = toDateStr(weekDates[6]);
 
-    // עובדים פעילים
     const { data: waiterRows } = await supabase
       .from('waiters')
       .select('id, full_name, role')
@@ -67,7 +68,6 @@ export default function AdminRosterPage() {
       .order('full_name');
     setWaiters(waiterRows || []);
 
-    // אילוצים בשבוע הזה
     const { data: cons } = await supabase
       .from('availability_constraints')
       .select('waiter_id, constraint_date')
@@ -81,17 +81,19 @@ export default function AdminRosterPage() {
     });
     setConstraints(cMap);
 
-    // שיבוצים בשבוע הזה
     const { data: ros } = await supabase
       .from('daily_roster')
-      .select('waiter_id, roster_date')
+      .select('waiter_id, roster_date, is_opening, is_closing')
       .gte('roster_date', startStr)
       .lte('roster_date', endStr);
 
-    const rMap: Record<string, Set<string>> = {};
+    const rMap: Record<string, Record<string, RosterEntry>> = {};
     (ros || []).forEach((r) => {
-      if (!rMap[r.roster_date]) rMap[r.roster_date] = new Set();
-      rMap[r.roster_date].add(r.waiter_id);
+      if (!rMap[r.roster_date]) rMap[r.roster_date] = {};
+      rMap[r.roster_date][r.waiter_id] = {
+        is_opening: r.is_opening || false,
+        is_closing: r.is_closing || false,
+      };
     });
     setRoster(rMap);
 
@@ -105,19 +107,18 @@ export default function AdminRosterPage() {
   const selectedDate = weekDates[selectedDay];
   const selectedDateStr = toDateStr(selectedDate);
   const blockedToday = constraints[selectedDateStr] || new Set();
-  const rosteredToday = roster[selectedDateStr] || new Set();
+  const rosteredToday = roster[selectedDateStr] || {};
 
-  // עובדים זמינים ביום הנבחר (לא חסמו)
   const availableWaiters = waiters.filter((w) => !blockedToday.has(w.id));
   const blockedWaiters = waiters.filter((w) => blockedToday.has(w.id));
 
+  // שיבוץ / ביטול שיבוץ
   async function toggleAssignment(waiterId: string) {
     const supabase = createClient();
-    const isAssigned = rosteredToday.has(waiterId);
+    const isAssigned = !!rosteredToday[waiterId];
     setSaving(waiterId);
 
     if (isAssigned) {
-      // הסרה
       await supabase
         .from('daily_roster')
         .delete()
@@ -125,37 +126,59 @@ export default function AdminRosterPage() {
         .eq('waiter_id', waiterId);
       setRoster((prev) => {
         const next = { ...prev };
-        const s = new Set(next[selectedDateStr] || []);
-        s.delete(waiterId);
-        next[selectedDateStr] = s;
+        const day = { ...(next[selectedDateStr] || {}) };
+        delete day[waiterId];
+        next[selectedDateStr] = day;
         return next;
       });
     } else {
-      // הוספה
       await supabase
         .from('daily_roster')
         .insert({ roster_date: selectedDateStr, waiter_id: waiterId });
       setRoster((prev) => {
         const next = { ...prev };
-        const s = new Set(next[selectedDateStr] || []);
-        s.add(waiterId);
-        next[selectedDateStr] = s;
+        const day = { ...(next[selectedDateStr] || {}) };
+        day[waiterId] = { is_opening: false, is_closing: false };
+        next[selectedDateStr] = day;
         return next;
       });
     }
     setSaving(null);
   }
 
+  // החלפת פתיחה/סגירה
+  async function toggleRole(waiterId: string, field: 'is_opening' | 'is_closing') {
+    const supabase = createClient();
+    const current = rosteredToday[waiterId];
+    if (!current) return;
+    const newVal = !current[field];
+    setSaving(waiterId);
+
+    await supabase
+      .from('daily_roster')
+      .update({ [field]: newVal })
+      .eq('roster_date', selectedDateStr)
+      .eq('waiter_id', waiterId);
+
+    setRoster((prev) => {
+      const next = { ...prev };
+      const day = { ...(next[selectedDateStr] || {}) };
+      day[waiterId] = { ...day[waiterId], [field]: newVal };
+      next[selectedDateStr] = day;
+      return next;
+    });
+    setSaving(null);
+  }
+
+  const assignedList = waiters.filter((w) => rosteredToday[w.id]);
+
   return (
     <div className="min-h-screen bg-slate-50 p-4 md:p-8">
       <div className="mx-auto max-w-6xl">
-        {/* כותרת */}
         <div className="mb-6 flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold text-slate-900">📅 סידור עבודה שבועי</h1>
-            <p className="text-sm text-slate-500">
-              לחץ על יום כדי לראות מי זמין ולשבץ
-            </p>
+            <p className="text-sm text-slate-500">לחץ על יום כדי לראות מי זמין ולשבץ</p>
           </div>
           <Link
             href="/admin"
@@ -176,7 +199,7 @@ export default function AdminRosterPage() {
               {weekDates.map((d, i) => {
                 const ds = toDateStr(d);
                 const availCount = waiters.length - (constraints[ds]?.size || 0);
-                const assignedCount = roster[ds]?.size || 0;
+                const assignedCount = Object.keys(roster[ds] || {}).length;
                 const isSelected = i === selectedDay;
                 return (
                   <button
@@ -189,7 +212,9 @@ export default function AdminRosterPage() {
                     }`}
                   >
                     <div className="text-xs font-medium text-slate-500">{DAYS_HE[i]}</div>
-                    <div className="text-lg font-bold text-slate-800">{d.getDate()}/{d.getMonth() + 1}</div>
+                    <div className="text-lg font-bold text-slate-800">
+                      {d.getDate()}/{d.getMonth() + 1}
+                    </div>
                     <div className="mt-1 text-[11px] text-green-600">{availCount} זמינים</div>
                     {assignedCount > 0 && (
                       <div className="text-[11px] font-semibold text-rose-600">
@@ -201,7 +226,6 @@ export default function AdminRosterPage() {
               })}
             </div>
 
-            {/* היום הנבחר */}
             <div className="rounded-xl bg-white p-5 shadow-sm">
               <h2 className="mb-4 text-lg font-bold text-slate-800">
                 {DAYS_HE[selectedDay]} · {selectedDate.getDate()}/{selectedDate.getMonth() + 1}
@@ -215,32 +239,63 @@ export default function AdminRosterPage() {
                 {availableWaiters.length === 0 ? (
                   <p className="text-sm text-slate-400">אף אחד לא זמין ביום זה</p>
                 ) : (
-                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                     {availableWaiters.map((w) => {
-                      const assigned = rosteredToday.has(w.id);
+                      const entry = rosteredToday[w.id];
+                      const assigned = !!entry;
                       return (
-                        <button
+                        <div
                           key={w.id}
-                          onClick={() => toggleAssignment(w.id)}
-                          disabled={saving === w.id}
-                          className={`flex items-center justify-between rounded-lg border p-3 text-right transition ${
-                            assigned
-                              ? 'border-rose-500 bg-rose-50'
-                              : 'border-slate-200 bg-white hover:border-rose-300'
+                          className={`rounded-lg border p-3 transition ${
+                            assigned ? 'border-rose-500 bg-rose-50' : 'border-slate-200 bg-white'
                           }`}
                         >
-                          <div>
-                            <div className="text-sm font-semibold text-slate-800">
-                              {w.full_name}
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <div className="text-sm font-semibold text-slate-800">
+                                {w.full_name}
+                              </div>
+                              <div className="text-xs text-slate-400">
+                                {roleLabels[w.role] || w.role}
+                              </div>
                             </div>
-                            <div className="text-xs text-slate-400">
-                              {roleLabels[w.role] || w.role}
+                            <button
+                              onClick={() => toggleAssignment(w.id)}
+                              disabled={saving === w.id}
+                              className="text-xl"
+                            >
+                              {saving === w.id ? '⏳' : assigned ? '✅' : '➕'}
+                            </button>
+                          </div>
+
+                          {/* כפתורי פתיחה/סגירה - רק אם משובץ */}
+                          {assigned && (
+                            <div className="mt-3 flex gap-2 border-t border-rose-100 pt-3">
+                              <button
+                                onClick={() => toggleRole(w.id, 'is_opening')}
+                                disabled={saving === w.id}
+                                className={`flex-1 rounded-lg px-2 py-1.5 text-xs font-medium transition ${
+                                  entry.is_opening
+                                    ? 'bg-amber-500 text-white'
+                                    : 'bg-slate-100 text-slate-500 hover:bg-amber-100'
+                                }`}
+                              >
+                                🌅 פתיחה
+                              </button>
+                              <button
+                                onClick={() => toggleRole(w.id, 'is_closing')}
+                                disabled={saving === w.id}
+                                className={`flex-1 rounded-lg px-2 py-1.5 text-xs font-medium transition ${
+                                  entry.is_closing
+                                    ? 'bg-indigo-600 text-white'
+                                    : 'bg-slate-100 text-slate-500 hover:bg-indigo-100'
+                                }`}
+                              >
+                                🌙 סגירה
+                              </button>
                             </div>
-                          </div>
-                          <div className="text-xl">
-                            {saving === w.id ? '⏳' : assigned ? '✅' : '➕'}
-                          </div>
-                        </button>
+                          )}
+                        </div>
                       );
                     })}
                   </div>
@@ -266,17 +321,27 @@ export default function AdminRosterPage() {
                 </div>
               )}
 
-              {/* סיכום משובצים */}
-              {rosteredToday.size > 0 && (
-                <div className="mt-5 rounded-lg bg-rose-50 p-3">
-                  <div className="text-sm font-semibold text-rose-800">
-                    משובצים ל{DAYS_HE[selectedDay]}: {rosteredToday.size}
+              {/* סיכום */}
+              {assignedList.length > 0 && (
+                <div className="mt-5 rounded-lg bg-rose-50 p-4">
+                  <div className="mb-2 text-sm font-semibold text-rose-800">
+                    משובצים ל{DAYS_HE[selectedDay]}: {assignedList.length}
                   </div>
-                  <div className="mt-1 text-xs text-rose-600">
-                    {waiters
-                      .filter((w) => rosteredToday.has(w.id))
-                      .map((w) => w.full_name)
-                      .join(' · ')}
+                  <div className="space-y-1">
+                    {assignedList.map((w) => {
+                      const e = rosteredToday[w.id];
+                      const tags = [];
+                      if (e.is_opening) tags.push('🌅 פתיחה');
+                      if (e.is_closing) tags.push('🌙 סגירה');
+                      return (
+                        <div key={w.id} className="flex items-center gap-2 text-xs text-rose-700">
+                          <span className="font-medium">{w.full_name}</span>
+                          {tags.length > 0 && (
+                            <span className="text-rose-500">· {tags.join(' · ')}</span>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               )}
