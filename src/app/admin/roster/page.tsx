@@ -11,8 +11,8 @@ interface Waiter {
 }
 
 interface RosterEntry {
-  is_opening: boolean;
-  is_closing: boolean;
+  shift_role: string;
+  role_number: number | null;
 }
 
 const roleLabels: Record<string, string> = {
@@ -21,6 +21,22 @@ const roleLabels: Record<string, string> = {
   hostess: 'מארח/ת',
   runner: 'ראנר/ית',
 };
+
+// אפשרויות התפקיד במשמרת
+const SHIFT_ROLES: { value: string; label: string; hasNumber?: boolean; color: string }[] = [
+  { value: 'regular', label: 'רגיל', color: 'bg-slate-100 text-slate-600' },
+  { value: 'opening', label: '🌅 פתיחה', color: 'bg-amber-500 text-white' },
+  { value: 'closing', label: '🌙 סגירה', color: 'bg-indigo-600 text-white' },
+  { value: 'backup', label: '➕ תגבור', hasNumber: true, color: 'bg-green-600 text-white' },
+  { value: 'standby', label: '⏸️ סטנד ביי', color: 'bg-orange-400 text-white' },
+];
+
+function roleDisplay(entry: RosterEntry): string {
+  const r = SHIFT_ROLES.find((x) => x.value === entry.shift_role);
+  if (!r) return 'רגיל';
+  if (r.value === 'backup' && entry.role_number) return `➕ תגבור ${entry.role_number}`;
+  return r.label;
+}
 
 const DAYS_HE = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'];
 
@@ -44,7 +60,6 @@ export default function AdminRosterPage() {
   const [loading, setLoading] = useState(true);
   const [waiters, setWaiters] = useState<Waiter[]>([]);
   const [constraints, setConstraints] = useState<Record<string, Set<string>>>({});
-  // roster[dateStr][waiterId] = { is_opening, is_closing }
   const [roster, setRoster] = useState<Record<string, Record<string, RosterEntry>>>({});
   const [weekStart] = useState<Date>(getWeekStart());
   const [selectedDay, setSelectedDay] = useState<number>(new Date().getDay());
@@ -83,7 +98,7 @@ export default function AdminRosterPage() {
 
     const { data: ros } = await supabase
       .from('daily_roster')
-      .select('waiter_id, roster_date, is_opening, is_closing')
+      .select('waiter_id, roster_date, shift_role, role_number')
       .gte('roster_date', startStr)
       .lte('roster_date', endStr);
 
@@ -91,12 +106,11 @@ export default function AdminRosterPage() {
     (ros || []).forEach((r) => {
       if (!rMap[r.roster_date]) rMap[r.roster_date] = {};
       rMap[r.roster_date][r.waiter_id] = {
-        is_opening: r.is_opening || false,
-        is_closing: r.is_closing || false,
+        shift_role: r.shift_role || 'regular',
+        role_number: r.role_number,
       };
     });
     setRoster(rMap);
-
     setLoading(false);
   }, []);
 
@@ -112,7 +126,10 @@ export default function AdminRosterPage() {
   const availableWaiters = waiters.filter((w) => !blockedToday.has(w.id));
   const blockedWaiters = waiters.filter((w) => blockedToday.has(w.id));
 
-  // שיבוץ / ביטול שיבוץ
+  // הפרדה למלצרים וברמנים
+  const availWaitersList = availableWaiters.filter((w) => w.role === 'waiter' || w.role === 'hostess' || w.role === 'runner');
+  const availBartendersList = availableWaiters.filter((w) => w.role === 'bartender');
+
   async function toggleAssignment(waiterId: string) {
     const supabase = createClient();
     const isAssigned = !!rosteredToday[waiterId];
@@ -134,11 +151,11 @@ export default function AdminRosterPage() {
     } else {
       await supabase
         .from('daily_roster')
-        .insert({ roster_date: selectedDateStr, waiter_id: waiterId });
+        .insert({ roster_date: selectedDateStr, waiter_id: waiterId, shift_role: 'regular' });
       setRoster((prev) => {
         const next = { ...prev };
         const day = { ...(next[selectedDateStr] || {}) };
-        day[waiterId] = { is_opening: false, is_closing: false };
+        day[waiterId] = { shift_role: 'regular', role_number: null };
         next[selectedDateStr] = day;
         return next;
       });
@@ -146,28 +163,89 @@ export default function AdminRosterPage() {
     setSaving(null);
   }
 
-  // החלפת פתיחה/סגירה
-  async function toggleRole(waiterId: string, field: 'is_opening' | 'is_closing') {
+  async function setRole(waiterId: string, shiftRole: string, roleNumber: number | null) {
     const supabase = createClient();
-    const current = rosteredToday[waiterId];
-    if (!current) return;
-    const newVal = !current[field];
     setSaving(waiterId);
-
     await supabase
       .from('daily_roster')
-      .update({ [field]: newVal })
+      .update({ shift_role: shiftRole, role_number: roleNumber })
       .eq('roster_date', selectedDateStr)
       .eq('waiter_id', waiterId);
-
     setRoster((prev) => {
       const next = { ...prev };
       const day = { ...(next[selectedDateStr] || {}) };
-      day[waiterId] = { ...day[waiterId], [field]: newVal };
+      day[waiterId] = { shift_role: shiftRole, role_number: roleNumber };
       next[selectedDateStr] = day;
       return next;
     });
     setSaving(null);
+  }
+
+  function renderWaiterCard(w: Waiter) {
+    const entry = rosteredToday[w.id];
+    const assigned = !!entry;
+    return (
+      <div
+        key={w.id}
+        className={`rounded-lg border p-3 transition ${
+          assigned ? 'border-rose-500 bg-rose-50' : 'border-slate-200 bg-white'
+        }`}
+      >
+        <div className="flex items-center justify-between">
+          <div className="text-sm font-semibold text-slate-800">{w.full_name}</div>
+          <button
+            onClick={() => toggleAssignment(w.id)}
+            disabled={saving === w.id}
+            className="text-xl"
+          >
+            {saving === w.id ? '⏳' : assigned ? '✅' : '➕'}
+          </button>
+        </div>
+
+        {assigned && (
+          <div className="mt-3 border-t border-rose-100 pt-3">
+            <div className="mb-2 text-xs font-medium text-slate-500">
+              תפקיד: <span className="font-bold text-rose-700">{roleDisplay(entry)}</span>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {SHIFT_ROLES.map((sr) => {
+                if (sr.value === 'backup') {
+                  // כפתורי תגבור 1-4
+                  return [1, 2, 3, 4].map((n) => {
+                    const active = entry.shift_role === 'backup' && entry.role_number === n;
+                    return (
+                      <button
+                        key={`backup-${n}`}
+                        onClick={() => setRole(w.id, 'backup', n)}
+                        disabled={saving === w.id}
+                        className={`rounded px-2 py-1 text-[11px] font-medium transition ${
+                          active ? 'bg-green-600 text-white' : 'bg-slate-100 text-slate-500 hover:bg-green-100'
+                        }`}
+                      >
+                        תגבור {n}
+                      </button>
+                    );
+                  });
+                }
+                const active = entry.shift_role === sr.value;
+                return (
+                  <button
+                    key={sr.value}
+                    onClick={() => setRole(w.id, sr.value, null)}
+                    disabled={saving === w.id}
+                    className={`rounded px-2 py-1 text-[11px] font-medium transition ${
+                      active ? sr.color : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                    }`}
+                  >
+                    {sr.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </div>
+    );
   }
 
   const assignedList = waiters.filter((w) => rosteredToday[w.id]);
@@ -178,7 +256,7 @@ export default function AdminRosterPage() {
         <div className="mb-6 flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold text-slate-900">📅 סידור עבודה שבועי</h1>
-            <p className="text-sm text-slate-500">לחץ על יום כדי לראות מי זמין ולשבץ</p>
+            <p className="text-sm text-slate-500">שבץ עובדים וסמן תפקיד (פתיחה/סגירה/תגבור)</p>
           </div>
           <Link
             href="/admin"
@@ -189,12 +267,9 @@ export default function AdminRosterPage() {
         </div>
 
         {loading ? (
-          <div className="rounded-xl bg-white p-12 text-center text-slate-400 shadow-sm">
-            טוען...
-          </div>
+          <div className="rounded-xl bg-white p-12 text-center text-slate-400 shadow-sm">טוען...</div>
         ) : (
           <>
-            {/* שורת ימי השבוע */}
             <div className="mb-6 grid grid-cols-7 gap-2">
               {weekDates.map((d, i) => {
                 const ds = toDateStr(d);
@@ -206,20 +281,14 @@ export default function AdminRosterPage() {
                     key={i}
                     onClick={() => setSelectedDay(i)}
                     className={`rounded-xl border-2 p-3 text-center transition ${
-                      isSelected
-                        ? 'border-rose-600 bg-rose-50 shadow-md'
-                        : 'border-slate-200 bg-white hover:border-rose-300'
+                      isSelected ? 'border-rose-600 bg-rose-50 shadow-md' : 'border-slate-200 bg-white hover:border-rose-300'
                     }`}
                   >
                     <div className="text-xs font-medium text-slate-500">{DAYS_HE[i]}</div>
-                    <div className="text-lg font-bold text-slate-800">
-                      {d.getDate()}/{d.getMonth() + 1}
-                    </div>
+                    <div className="text-lg font-bold text-slate-800">{d.getDate()}/{d.getMonth() + 1}</div>
                     <div className="mt-1 text-[11px] text-green-600">{availCount} זמינים</div>
                     {assignedCount > 0 && (
-                      <div className="text-[11px] font-semibold text-rose-600">
-                        ✓ {assignedCount} משובצים
-                      </div>
+                      <div className="text-[11px] font-semibold text-rose-600">✓ {assignedCount} משובצים</div>
                     )}
                   </button>
                 );
@@ -231,89 +300,41 @@ export default function AdminRosterPage() {
                 {DAYS_HE[selectedDay]} · {selectedDate.getDate()}/{selectedDate.getMonth() + 1}
               </h2>
 
-              {/* זמינים */}
-              <div className="mb-5">
-                <h3 className="mb-2 text-sm font-semibold text-green-700">
-                  🟢 זמינים לעבודה ({availableWaiters.length})
+              {/* מלצרים */}
+              <div className="mb-6">
+                <h3 className="mb-2 text-sm font-bold text-blue-700">
+                  🍽️ מלצרים ({availWaitersList.length})
                 </h3>
-                {availableWaiters.length === 0 ? (
-                  <p className="text-sm text-slate-400">אף אחד לא זמין ביום זה</p>
+                {availWaitersList.length === 0 ? (
+                  <p className="text-sm text-slate-400">אין מלצרים זמינים</p>
                 ) : (
                   <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                    {availableWaiters.map((w) => {
-                      const entry = rosteredToday[w.id];
-                      const assigned = !!entry;
-                      return (
-                        <div
-                          key={w.id}
-                          className={`rounded-lg border p-3 transition ${
-                            assigned ? 'border-rose-500 bg-rose-50' : 'border-slate-200 bg-white'
-                          }`}
-                        >
-                          <div className="flex items-center justify-between">
-                            <div>
-                              <div className="text-sm font-semibold text-slate-800">
-                                {w.full_name}
-                              </div>
-                              <div className="text-xs text-slate-400">
-                                {roleLabels[w.role] || w.role}
-                              </div>
-                            </div>
-                            <button
-                              onClick={() => toggleAssignment(w.id)}
-                              disabled={saving === w.id}
-                              className="text-xl"
-                            >
-                              {saving === w.id ? '⏳' : assigned ? '✅' : '➕'}
-                            </button>
-                          </div>
+                    {availWaitersList.map(renderWaiterCard)}
+                  </div>
+                )}
+              </div>
 
-                          {/* כפתורי פתיחה/סגירה - רק אם משובץ */}
-                          {assigned && (
-                            <div className="mt-3 flex gap-2 border-t border-rose-100 pt-3">
-                              <button
-                                onClick={() => toggleRole(w.id, 'is_opening')}
-                                disabled={saving === w.id}
-                                className={`flex-1 rounded-lg px-2 py-1.5 text-xs font-medium transition ${
-                                  entry.is_opening
-                                    ? 'bg-amber-500 text-white'
-                                    : 'bg-slate-100 text-slate-500 hover:bg-amber-100'
-                                }`}
-                              >
-                                🌅 פתיחה
-                              </button>
-                              <button
-                                onClick={() => toggleRole(w.id, 'is_closing')}
-                                disabled={saving === w.id}
-                                className={`flex-1 rounded-lg px-2 py-1.5 text-xs font-medium transition ${
-                                  entry.is_closing
-                                    ? 'bg-indigo-600 text-white'
-                                    : 'bg-slate-100 text-slate-500 hover:bg-indigo-100'
-                                }`}
-                              >
-                                🌙 סגירה
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
+              {/* ברמנים */}
+              <div className="mb-6">
+                <h3 className="mb-2 text-sm font-bold text-purple-700">
+                  🍸 ברמנים ({availBartendersList.length})
+                </h3>
+                {availBartendersList.length === 0 ? (
+                  <p className="text-sm text-slate-400">אין ברמנים זמינים</p>
+                ) : (
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    {availBartendersList.map(renderWaiterCard)}
                   </div>
                 )}
               </div>
 
               {/* חסומים */}
               {blockedWaiters.length > 0 && (
-                <div>
-                  <h3 className="mb-2 text-sm font-semibold text-red-700">
-                    🔴 לא זמינים ({blockedWaiters.length})
-                  </h3>
+                <div className="mb-2">
+                  <h3 className="mb-2 text-sm font-semibold text-red-700">🔴 לא זמינים ({blockedWaiters.length})</h3>
                   <div className="flex flex-wrap gap-2">
                     {blockedWaiters.map((w) => (
-                      <span
-                        key={w.id}
-                        className="rounded-lg bg-red-50 px-3 py-1.5 text-xs text-red-600"
-                      >
+                      <span key={w.id} className="rounded-lg bg-red-50 px-3 py-1.5 text-xs text-red-600">
                         {w.full_name}
                       </span>
                     ))}
@@ -325,23 +346,15 @@ export default function AdminRosterPage() {
               {assignedList.length > 0 && (
                 <div className="mt-5 rounded-lg bg-rose-50 p-4">
                   <div className="mb-2 text-sm font-semibold text-rose-800">
-                    משובצים ל{DAYS_HE[selectedDay]}: {assignedList.length}
+                    סיכום {DAYS_HE[selectedDay]}: {assignedList.length} משובצים
                   </div>
                   <div className="space-y-1">
-                    {assignedList.map((w) => {
-                      const e = rosteredToday[w.id];
-                      const tags = [];
-                      if (e.is_opening) tags.push('🌅 פתיחה');
-                      if (e.is_closing) tags.push('🌙 סגירה');
-                      return (
-                        <div key={w.id} className="flex items-center gap-2 text-xs text-rose-700">
-                          <span className="font-medium">{w.full_name}</span>
-                          {tags.length > 0 && (
-                            <span className="text-rose-500">· {tags.join(' · ')}</span>
-                          )}
-                        </div>
-                      );
-                    })}
+                    {assignedList.map((w) => (
+                      <div key={w.id} className="flex items-center gap-2 text-xs text-rose-700">
+                        <span className="font-medium">{w.full_name}</span>
+                        <span className="text-rose-500">· {roleDisplay(rosteredToday[w.id])}</span>
+                      </div>
+                    ))}
                   </div>
                 </div>
               )}

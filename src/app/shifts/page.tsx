@@ -56,7 +56,7 @@ function formatTime(timeStr: string): string {
 
 export default function ShiftsPage() {
   const [activeTab, setActiveTab] = useState<'roster' | 'shifts' | 'constraints'>('roster');
-  const [myRoster, setMyRoster] = useState<{ roster_date: string; is_opening: boolean; is_closing: boolean }[]>([]);
+  const [myRoster, setMyRoster] = useState<{ roster_date: string; shift_role: string; role_number: number | null }[]>([]);
   
   const [shifts, setShifts] = useState<Shift[]>([]);
   const [constraints, setConstraints] = useState<Constraint[]>([]);
@@ -109,7 +109,7 @@ export default function ShiftsPage() {
             const today = new Date().toISOString().split('T')[0];
             const { data: rosterRows } = await supabase
               .from('daily_roster')
-              .select('roster_date, is_opening, is_closing')
+              .select('roster_date, shift_role, role_number')
               .eq('waiter_id', waiterRow.id)
               .gte('roster_date', today)
               .order('roster_date', { ascending: true });
@@ -315,19 +315,21 @@ export default function ShiftsPage() {
                         </div>
                       </div>
                       <div className="flex flex-col items-end gap-1">
-                        <div className="bg-green-100 text-green-700 text-sm font-bold px-4 py-2 rounded-full">
-                          ✅ משובץ
-                        </div>
-                        {r.is_opening && (
-                          <div className="bg-amber-100 text-amber-700 text-xs font-bold px-3 py-1 rounded-full">
-                            🌅 פתיחה
-                          </div>
-                        )}
-                        {r.is_closing && (
-                          <div className="bg-indigo-100 text-indigo-700 text-xs font-bold px-3 py-1 rounded-full">
-                            🌙 סגירה
-                          </div>
-                        )}
+                        {(() => {
+                          const roleMap: Record<string, { label: string; cls: string }> = {
+                            opening: { label: '🌅 פתיחה', cls: 'bg-amber-100 text-amber-700' },
+                            closing: { label: '🌙 סגירה', cls: 'bg-indigo-100 text-indigo-700' },
+                            backup: { label: `➕ תגבור ${r.role_number || ''}`.trim(), cls: 'bg-green-100 text-green-700' },
+                            standby: { label: '⏸️ סטנד ביי', cls: 'bg-orange-100 text-orange-700' },
+                            regular: { label: '✅ משובץ', cls: 'bg-green-100 text-green-700' },
+                          };
+                          const info = roleMap[r.shift_role] || roleMap.regular;
+                          return (
+                            <div className={`text-sm font-bold px-4 py-2 rounded-full ${info.cls}`}>
+                              {info.label}
+                            </div>
+                          );
+                        })()}
                       </div>
                     </div>
                   );
