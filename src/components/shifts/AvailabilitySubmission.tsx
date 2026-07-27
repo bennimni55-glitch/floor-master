@@ -48,6 +48,7 @@ interface Props {
 
 export function AvailabilitySubmission({ waiterId }: Props) {
   const [selectedDays, setSelectedDays] = useState<Set<number>>(new Set());
+  const [dayNotes, setDayNotes] = useState<Record<number, string>>({});
   const [existing, setExisting] = useState<number[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -74,13 +75,18 @@ export function AvailabilitySubmission({ waiterId }: Props) {
       const supabase = createClient();
       const { data } = await supabase
         .from('availability_submissions')
-        .select('available_days')
+        .select('available_days, day_notes')
         .eq('waiter_id', waiterId)
         .eq('week_start', weekStartStr)
         .maybeSingle();
       if (data) {
         setExisting(data.available_days);
         setSelectedDays(new Set(data.available_days));
+        if (data.day_notes) {
+          const dn: Record<number, string> = {};
+          Object.entries(data.day_notes as Record<string, string>).forEach(([k, v]) => { dn[parseInt(k)] = v; });
+          setDayNotes(dn);
+        }
       }
       setLoading(false);
     };
@@ -158,7 +164,7 @@ export function AvailabilitySubmission({ waiterId }: Props) {
     const { error: upErr } = await supabase
       .from('availability_submissions')
       .upsert(
-        { waiter_id: waiterId, week_start: weekStartStr, available_days: days },
+        { waiter_id: waiterId, week_start: weekStartStr, available_days: days, day_notes: Object.fromEntries(Object.entries(dayNotes).filter(([k, v]) => selectedDays.has(parseInt(k)) && v.trim())) },
         { onConflict: 'waiter_id,week_start' }
       );
     if (upErr) {
@@ -261,6 +267,24 @@ export function AvailabilitySubmission({ waiterId }: Props) {
               );
             })}
           </div>
+
+          {/* הערות לימים מסומנים */}
+          {Array.from(selectedDays).sort().length > 0 && (
+            <div className="mb-4 space-y-2">
+              {Array.from(selectedDays).sort((a, b) => a - b).map((d) => (
+                <div key={d} className="flex items-center gap-2">
+                  <span className="text-xs font-medium text-slate-600 w-14">{DAYS_HE[d]}:</span>
+                  <input
+                    type="text"
+                    value={dayNotes[d] || ''}
+                    onChange={(e) => setDayNotes((p) => ({ ...p, [d]: e.target.value }))}
+                    placeholder="הערה (למשל: מ-21:30) - לא חובה"
+                    className="flex-1 rounded-lg border border-slate-200 px-3 py-1.5 text-xs"
+                  />
+                </div>
+              ))}
+            </div>
+          )}
 
           <button
             onClick={startSubmit}

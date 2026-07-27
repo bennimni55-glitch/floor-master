@@ -57,6 +57,7 @@ export default function AdminRosterPage() {
   const [waiters, setWaiters] = useState<Waiter[]>([]);
   // submissions[waiterId] = Set<dayIndex>
   const [submissions, setSubmissions] = useState<Record<string, Set<number>>>({});
+  const [subNotes, setSubNotes] = useState<Record<string, Record<number, string>>>({});
   const [roster, setRoster] = useState<Record<string, Record<string, RosterEntry>>>({});
   const [reqs, setReqs] = useState<Record<string, DayReq>>({});
   const [selectedDay, setSelectedDay] = useState<number>(0);
@@ -87,13 +88,20 @@ export default function AdminRosterPage() {
     // הגשות זמינות לשבוע הזה
     const { data: subs } = await supabase
       .from('availability_submissions')
-      .select('waiter_id, available_days')
+      .select('waiter_id, available_days, day_notes')
       .eq('week_start', startStr);
     const sMap: Record<string, Set<number>> = {};
+    const nMap: Record<string, Record<number, string>> = {};
     (subs || []).forEach((s) => {
       sMap[s.waiter_id] = new Set(s.available_days);
+      if (s.day_notes) {
+        const dn: Record<number, string> = {};
+        Object.entries(s.day_notes as Record<string, string>).forEach(([k, v]) => { dn[parseInt(k)] = v; });
+        nMap[s.waiter_id] = dn;
+      }
     });
     setSubmissions(sMap);
+    setSubNotes(nMap);
 
     // שיבוצים קיימים
     const { data: ros } = await supabase
@@ -329,7 +337,12 @@ export default function AdminRosterPage() {
         }`}
       >
         <div className="flex items-center justify-between">
-          <div className="text-sm font-semibold text-slate-800">{w.full_name}</div>
+          <div>
+            <div className="text-sm font-semibold text-slate-800">{w.full_name}</div>
+            {subNotes[w.id]?.[selectedDay] && (
+              <div className="text-[11px] font-bold text-orange-600">⚠️ {subNotes[w.id][selectedDay]}</div>
+            )}
+          </div>
           <button onClick={() => toggleAssignment(w.id)} disabled={saving === w.id} className="text-xl">
             {saving === w.id ? '⏳' : assigned ? '✅' : '➕'}
           </button>
@@ -550,6 +563,9 @@ export default function AdminRosterPage() {
                       <div key={w.id} className="flex items-center gap-2 text-xs text-rose-700">
                         <span className="font-medium">{w.full_name}</span>
                         <span className="text-rose-500">· {roleDisplay(rosteredToday[w.id])}</span>
+                        {subNotes[w.id]?.[selectedDay] && (
+                          <span className="font-bold text-orange-600">⚠️ {subNotes[w.id][selectedDay]}</span>
+                        )}
                       </div>
                     ))}
                   </div>
