@@ -28,9 +28,9 @@ function isPastDeadline(): boolean {
   const now = new Date();
   const il = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Jerusalem' }));
   const day = il.getDay();
-  // דדליין = שני (יום 1) בשעה 10:00 של השבוע הנוכחי
+  // דדליין = שלישי (יום 2) בשעה 10:00 של השבוע הנוכחי
   const deadline = new Date(il);
-  deadline.setDate(il.getDate() - day + 1);
+  deadline.setDate(il.getDate() - day + 2);
   deadline.setHours(10, 0, 0, 0);
   return il > deadline;
 }
@@ -181,7 +181,7 @@ export function AvailabilitySubmission({ waiterId }: Props) {
           סמן את הימים שאתה <b>יכול</b> לעבוד בהם · שבוע {weekDates[0].getDate()}/{weekDates[0].getMonth() + 1} - {weekDates[6].getDate()}/{weekDates[6].getMonth() + 1}
         </p>
         <p className="text-xs font-medium text-rose-600 mt-1">
-          ⏰ דדליין הגשה: יום שני ב-10:00 בבוקר · מי שלא הגיש - לא ישובץ
+          ⏰ דדליין הגשה: יום שלישי ב-10:00 בבוקר · מי שלא הגיש - לא ישובץ
         </p>
       </div>
 
@@ -271,7 +271,7 @@ export function AvailabilitySubmission({ waiterId }: Props) {
           </button>
           {pastDeadline && !existing && (
             <p className="mt-2 text-center text-xs text-red-600 font-medium">
-              הדדליין להגשה עבר (שני 10:00). פנה למנהל.
+              הדדליין להגשה עבר (שלישי 10:00). פנה למנהל.
             </p>
           )}
         </>
