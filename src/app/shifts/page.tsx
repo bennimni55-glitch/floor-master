@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { createClient } from '@/lib/supabase/client';
+import { AvailabilitySubmission } from '@/components/shifts/AvailabilitySubmission';
 
 interface Shift {
   id: string;
@@ -56,6 +57,7 @@ function formatTime(timeStr: string): string {
 
 export default function ShiftsPage() {
   const [activeTab, setActiveTab] = useState<'roster' | 'shifts' | 'constraints'>('roster');
+  const [myWaiterId, setMyWaiterId] = useState<string | null>(null);
   const [myRoster, setMyRoster] = useState<{ roster_date: string; shift_role: string; role_number: number | null }[]>([]);
   
   const [shifts, setShifts] = useState<Shift[]>([]);
@@ -106,6 +108,7 @@ export default function ShiftsPage() {
             .eq('auth_user_id', user.id)
             .single();
           if (waiterRow) {
+            setMyWaiterId(waiterRow.id);
             const today = new Date().toISOString().split('T')[0];
             const { data: rosterRows } = await supabase
               .from('daily_roster')
@@ -273,7 +276,7 @@ export default function ShiftsPage() {
                   : 'text-slate-500 border-transparent hover:text-slate-700'
               }`}
             >
-              🚫 האילוצים שלי {constraints.length > 0 && `(${constraints.length})`}
+              🗓️ הגשת זמינות
             </button>
           </div>
         </div>
@@ -464,104 +467,10 @@ export default function ShiftsPage() {
         )}
 
         {/* Tab: Constraints */}
-        {activeTab === 'constraints' && (
-          <>
-            {!showConstraintForm ? (
-              <button
-                onClick={() => setShowConstraintForm(true)}
-                className="w-full bg-slate-900 hover:bg-slate-800 text-white font-medium py-3 rounded-lg transition mb-4"
-              >
-                + הוסף אילוץ חדש
-              </button>
-            ) : (
-              <div className="bg-white rounded-xl border border-slate-200 p-5 mb-4">
-                <div className="flex justify-between items-center mb-4">
-                  <h3 className="font-semibold text-slate-900">אילוץ חדש</h3>
-                  <button onClick={() => setShowConstraintForm(false)} className="text-slate-400 hover:text-slate-600">✕</button>
-                </div>
-
-                <form onSubmit={addConstraint} className="space-y-3">
-                  <div>
-                    <label className="block text-xs font-medium text-slate-700 mb-1">תאריך</label>
-                    <input
-                      type="date"
-                      required
-                      value={newConstraint.constraint_date}
-                      onChange={(e) => setNewConstraint({ ...newConstraint, constraint_date: e.target.value })}
-                      className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
-                    />
-                  </div>
-
-                  <div className="bg-rose-50 border border-rose-200 rounded-lg p-3 text-sm text-rose-700">
-                    סימון תאריך = לא יכול/ה לעבוד באותו יום (כל היום)
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-medium text-slate-700 mb-1">סיבה (אופציונלי)</label>
-                    <input
-                      type="text"
-                      value={newConstraint.reason}
-                      onChange={(e) => setNewConstraint({ ...newConstraint, reason: e.target.value })}
-                      placeholder="למשל: לימודים, חתונה, רופא..."
-                      className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
-                    />
-                  </div>
-
-                  <button
-                    type="submit"
-                    disabled={actionLoading === 'add-constraint'}
-                    className="w-full bg-slate-900 hover:bg-slate-800 disabled:bg-slate-400 text-white text-sm font-medium py-2.5 rounded-lg transition"
-                  >
-                    {actionLoading === 'add-constraint' ? 'שולח...' : 'הוסף אילוץ'}
-                  </button>
-                </form>
-              </div>
-            )}
-
-            {constraints.length === 0 ? (
-              <div className="bg-slate-100 border-2 border-dashed border-slate-300 rounded-2xl p-10 text-center">
-                <div className="text-4xl mb-3">📅</div>
-                <p className="text-sm text-slate-600">אין אילוצים עתידיים</p>
-                <p className="text-xs text-slate-500 mt-1">סמן ימים שלא יכול/ה לעבוד</p>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {constraints.map((c) => {
-                  const status = statusLabels[c.status];
-                  return (
-                    <div key={c.id} className="bg-white rounded-xl border border-slate-200 p-4">
-                      <div className="flex justify-between items-start mb-2">
-                        <div>
-                          <p className="font-semibold text-slate-900">{formatDate(c.constraint_date)}</p>
-                          <p className="text-sm text-slate-500 mt-0.5">
-                            {c.all_day ? 'כל היום' : `${formatTime(c.start_time || '00:00')} - ${formatTime(c.end_time || '00:00')}`}
-                          </p>
-                        </div>
-                        {status && (
-                          <span className={`text-xs px-2.5 py-1 rounded-md font-medium ${status.color}`}>
-                            {status.text}
-                          </span>
-                        )}
-                      </div>
-
-                      {c.reason && (
-                        <p className="text-xs text-slate-500 mb-3 bg-slate-50 rounded p-2">סיבה: {c.reason}</p>
-                      )}
-
-                      <button
-                        onClick={() => deleteConstraint(c.id)}
-                        disabled={actionLoading === c.id}
-                        className="text-xs text-red-600 hover:text-red-800 font-medium disabled:opacity-50"
-                      >
-                        {actionLoading === c.id ? 'מוחק...' : '🗑️ מחק אילוץ'}
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </>
+        {activeTab === 'constraints' && myWaiterId && (
+          <AvailabilitySubmission waiterId={myWaiterId} />
         )}
+
       </main>
     </div>
   );
