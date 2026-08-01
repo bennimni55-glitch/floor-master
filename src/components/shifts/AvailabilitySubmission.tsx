@@ -11,7 +11,8 @@ function nextWeekStart(): Date {
   const now = new Date();
   const il = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Jerusalem' }));
   const day = il.getDay();
-  il.setDate(il.getDate() - day + 7); // ראשון הבא
+  // תמיד השבוע הקרוב שטרם התחיל: ראשון הבא (בשבת = מחר)
+  il.setDate(il.getDate() - day + 7);
   il.setHours(0, 0, 0, 0);
   return il;
 }
@@ -187,7 +188,7 @@ export function AvailabilitySubmission({ waiterId }: Props) {
           סמן את הימים שאתה <b>יכול</b> לעבוד בהם · שבוע {weekDates[0].getDate()}/{weekDates[0].getMonth() + 1} - {weekDates[6].getDate()}/{weekDates[6].getMonth() + 1}
         </p>
         <p className="text-xs font-medium text-rose-600 mt-1">
-          ⏰ דדליין הגשה: יום שלישי ב-10:00 בבוקר · מי שלא הגיש - לא ישובץ
+          💡 מומלץ להגיש מוקדם · מי שלא הגיש - לא ישובץ
         </p>
       </div>
 
@@ -288,16 +289,12 @@ export function AvailabilitySubmission({ waiterId }: Props) {
 
           <button
             onClick={startSubmit}
-            disabled={saving || pastDeadline}
+            disabled={saving}
             className="w-full rounded-xl bg-slate-900 py-3 text-sm font-bold text-white hover:bg-slate-800 disabled:bg-slate-300"
           >
             {existing ? '🔄 עדכן זמינות' : '📤 הגש זמינות'}
           </button>
-          {pastDeadline && !existing && (
-            <p className="mt-2 text-center text-xs text-red-600 font-medium">
-              הדדליין להגשה עבר (שלישי 10:00). פנה למנהל.
-            </p>
-          )}
+
         </>
       )}
     </div>
