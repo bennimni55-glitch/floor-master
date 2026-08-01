@@ -50,6 +50,7 @@ interface Props {
 export function AvailabilitySubmission({ waiterId }: Props) {
   const [selectedDays, setSelectedDays] = useState<Set<number>>(new Set());
   const [dayNotes, setDayNotes] = useState<Record<number, string>>({});
+  const [lockedDays, setLockedDays] = useState<Set<number>>(new Set());
   const [existing, setExisting] = useState<number[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -89,12 +90,38 @@ export function AvailabilitySubmission({ waiterId }: Props) {
           setDayNotes(dn);
         }
       }
+      // ימים שכבר שובצת בהם - נעולים
+      const weekEnd = new Date(weekStart);
+      weekEnd.setDate(weekStart.getDate() + 6);
+      const { data: rosterRows } = await supabase
+        .from('daily_roster')
+        .select('roster_date')
+        .eq('waiter_id', waiterId)
+        .gte('roster_date', weekStartStr)
+        .lte('roster_date', toDateStr(weekEnd));
+      if (rosterRows && rosterRows.length > 0) {
+        const locked = new Set<number>();
+        rosterRows.forEach((r) => {
+          const d = new Date(r.roster_date + 'T00:00:00');
+          const diff = Math.round((d.getTime() - weekStart.getTime()) / 86400000);
+          if (diff >= 0 && diff <= 6) locked.add(diff);
+        });
+        setLockedDays(locked);
+        // ימים נעולים תמיד מסומנים
+        setSelectedDays((prev) => {
+          const next = new Set(prev);
+          locked.forEach((d) => next.add(d));
+          return next;
+        });
+      }
+
       setLoading(false);
     };
     load();
   }, [waiterId, weekStartStr]);
 
   function toggleDay(i: number) {
+    if (lockedDays.has(i)) return; // שובצת - אי אפשר לבטל
     setSelectedDays((prev) => {
       const next = new Set(prev);
       if (next.has(i)) next.delete(i);
@@ -246,6 +273,9 @@ export function AvailabilitySubmission({ waiterId }: Props) {
       ) : (
         <>
           {/* בחירת ימים */}
+          {lockedDays.size > 0 && (
+            <p className="mb-2 text-xs text-slate-500">🔒 = כבר שובצת ליום זה - לביטול פנה למנהל</p>
+          )}
           <div className="grid grid-cols-7 gap-1.5 mb-4">
             {weekDates.map((d, i) => {
               const on = selectedDays.has(i);
@@ -263,7 +293,7 @@ export function AvailabilitySubmission({ waiterId }: Props) {
                   <div className="text-sm font-bold text-slate-800">
                     {d.getDate()}/{d.getMonth() + 1}
                   </div>
-                  <div className="mt-1 text-base">{on ? '✅' : '·'}</div>
+                  <div className="mt-1 text-base">{lockedDays.has(i) ? '🔒' : on ? '✅' : '·'}</div>
                 </button>
               );
             })}
