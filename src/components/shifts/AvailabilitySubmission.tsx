@@ -11,8 +11,8 @@ function nextWeekStart(): Date {
   const now = new Date();
   const il = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Jerusalem' }));
   const day = il.getDay();
-  // תמיד השבוע הקרוב שטרם התחיל: ראשון הבא (בשבת = מחר)
-  il.setDate(il.getDate() - day + 7);
+  // השבוע הנוכחי: ראשון של השבוע שאנחנו בתוכו
+  il.setDate(il.getDate() - day);
   il.setHours(0, 0, 0, 0);
   return il;
 }
@@ -210,9 +210,9 @@ export function AvailabilitySubmission({ waiterId }: Props) {
   return (
     <div>
       <div className="mb-4">
-        <h2 className="text-lg font-bold text-slate-900">🗓️ הגשת זמינות לשבוע הבא</h2>
+        <h2 className="text-lg font-bold text-slate-900">🗓️ הגשת זמינות לשבוע</h2>
         <p className="text-sm text-slate-500">
-          סמן את הימים שאתה <b>יכול</b> לעבוד בהם · שבוע {weekDates[0].getDate()}/{weekDates[0].getMonth() + 1} - {weekDates[6].getDate()}/{weekDates[6].getMonth() + 1}
+          סמן את הימים שאתה <b>יכול</b> לעבוד בהם השבוע ·  {weekDates[0].getDate()}/{weekDates[0].getMonth() + 1} - {weekDates[6].getDate()}/{weekDates[6].getMonth() + 1}
         </p>
         <p className="text-xs font-medium text-rose-600 mt-1">
           💡 מומלץ להגיש מוקדם · מי שלא הגיש - לא ישובץ
@@ -222,7 +222,7 @@ export function AvailabilitySubmission({ waiterId }: Props) {
       {/* סטטוס */}
       {existing && !success && (
         <div className="mb-4 rounded-lg bg-blue-50 border border-blue-200 px-4 py-3 text-sm text-blue-700">
-          ✅ הגשת זמינות לשבוע הבא ({existing.map((d) => DAYS_HE[d]).join(', ')}). אפשר לעדכן ולהגיש שוב.
+          ✅ הגשת זמינות לשבוע ({existing.map((d) => DAYS_HE[d]).join(', ')}). אפשר לעדכן ולהגיש שוב.
         </div>
       )}
       {success && (
