@@ -203,11 +203,13 @@ export default function AdminRosterPage() {
   async function setRole(waiterId: string, shiftRole: string, roleNumber: number | null) {
     const supabase = createClient();
     setSaving(waiterId);
-    await supabase
+    const { data: upData, error: upErr } = await supabase
       .from('daily_roster')
       .update({ shift_role: shiftRole, role_number: roleNumber })
       .eq('roster_date', selectedDateStr)
-      .eq('waiter_id', waiterId);
+      .eq('waiter_id', waiterId)
+      .select();
+    console.log('setRole →', { selectedDateStr, waiterId, shiftRole, rows: upData?.length, err: upErr });
     setRoster((prev) => {
       const next = { ...prev };
       const day = { ...(next[selectedDateStr] || {}) };
