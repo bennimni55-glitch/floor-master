@@ -27,7 +27,7 @@ export async function middleware(request: NextRequest) {
 
   const { data: { user } } = await supabase.auth.getUser();
 
-  const isPublicRoute = 
+  const isPublicRoute =
     request.nextUrl.pathname.startsWith('/login') ||
     request.nextUrl.pathname.startsWith('/auth');
 
@@ -37,6 +37,18 @@ export async function middleware(request: NextRequest) {
 
   if (user && request.nextUrl.pathname === '/login') {
     return NextResponse.redirect(new URL('/', request.url));
+  }
+
+  // הגנת /admin - רק owner
+  if (user && request.nextUrl.pathname.startsWith('/admin')) {
+    const { data: roles } = await supabase
+      .from('user_roles')
+      .select('role_id')
+      .eq('user_id', user.id);
+    const isOwner = (roles || []).some((r) => r.role_id === 'owner');
+    if (!isOwner) {
+      return NextResponse.redirect(new URL('/', request.url));
+    }
   }
 
   return response;
