@@ -72,7 +72,8 @@ export async function POST(request: Request) {
       .select('title, content, category')
       .eq('is_active', true);
 
-    const { data: menuItems } = await supabase
+    // menu comes from the SHARED public.menu_items (single source, kept fresh by BarPro)
+    const { data: menuItems } = await publicClient
       .from('menu_items')
       .select('name, description, price, allergens, selling_points')
       .eq('is_active', true);

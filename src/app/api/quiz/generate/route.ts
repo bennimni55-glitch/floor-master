@@ -73,7 +73,8 @@ export async function GET() {
       .eq('is_active', true)
       .limit(15);
 
-    const { data: menuItems } = await supabase
+    // menu comes from the SHARED public.menu_items (single source, kept fresh by BarPro)
+    const { data: menuItems } = await publicClient
       .from('menu_items')
       .select('name, description, price, allergens')
       .eq('is_active', true)
