@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 
 interface QuizOption {
   text: string;
-  is_correct: boolean;
+  // is_correct is never sent to the client — the server checks answers
 }
 
 interface Question {

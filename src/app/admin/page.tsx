@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { createClient } from '@/lib/supabase/client';
+import { createClient, createPublicClient } from '@/lib/supabase/client';
+import { computeTipDistribution, type TipSettings } from '@/lib/tips';
 
 interface WaiterStat {
   id: string;
@@ -98,7 +99,9 @@ interface TipResult {
   confirmed_at?: string | null;
 }
 
-const RUNNER_RATE = 50;
+// Tip rates live in the public.settings table (tips_runner_rate,
+// tips_include_hostess, tips_hostess_rate); these are only fallbacks.
+const DEFAULT_TIP_SETTINGS: TipSettings = { runnerRate: 50, includeHostess: false, hostessRate: 40 };
 
 const roleLabels: Record<string, string> = {
   waiter: 'מלצר',
@@ -202,10 +205,31 @@ export default function AdminDashboard() {
   const [tipResults, setTipResults] = useState<TipResult[] | null>(null);
   const [savedDistribution, setSavedDistribution] = useState<boolean>(false);
   const [activeShifts, setActiveShifts] = useState<ActiveShift[]>([]);
+  const [tipSettings, setTipSettings] = useState<TipSettings>(DEFAULT_TIP_SETTINGS);
+  const [tipsCapped, setTipsCapped] = useState<boolean>(false);
 
   useEffect(() => {
     loadData();
+    loadTipSettings();
   }, []);
+
+  async function loadTipSettings() {
+    try {
+      const pub = createPublicClient();
+      const { data } = await pub
+        .from('settings')
+        .select('key, value')
+        .in('key', ['tips_runner_rate', 'tips_include_hostess', 'tips_hostess_rate']);
+      const map = Object.fromEntries((data ?? []).map((r: { key: string; value: string }) => [r.key, r.value]));
+      setTipSettings({
+        runnerRate: Number(map.tips_runner_rate ?? DEFAULT_TIP_SETTINGS.runnerRate),
+        includeHostess: map.tips_include_hostess === 'true',
+        hostessRate: Number(map.tips_hostess_rate ?? DEFAULT_TIP_SETTINGS.hostessRate),
+      });
+    } catch {
+      /* fallbacks stay */
+    }
+  }
 
   useEffect(() => {
     loadDayShifts(tipsDate);
@@ -334,48 +358,23 @@ export default function AdminDashboard() {
 
     setError(null);
 
-    // שלב 1: ראנרים מקבלים 50 ₪ × שעות
-    const runners = completed.filter(s => s.role === 'runner');
-    const nonRunners = completed.filter(s => s.role !== 'runner' && (s.role === 'waiter' || s.role === 'bartender'));
-    
-    const runnerResults: TipResult[] = runners.map(r => ({
-      waiter_id: r.waiter_id,
-      full_name: r.full_name,
-      role: r.role,
-      hours: Number(r.hours_worked),
-      tip_amount: Math.round(Number(r.hours_worked) * RUNNER_RATE * 100) / 100,
-      is_runner: true,
-    }));
+    // Allocation logic lives in src/lib/tips.ts (pure + unit-tested):
+    // runners (and hostess, if enabled in settings) get a fixed hourly rate,
+    // CAPPED at the pool with a proportional scale-down; the remainder is
+    // split by hours between waiters and bartenders.
+    const allocation = computeTipDistribution(
+      tipsAmount,
+      completed.map(s => ({
+        waiter_id: s.waiter_id,
+        full_name: s.full_name,
+        role: s.role,
+        hours_worked: Number(s.hours_worked),
+      })),
+      tipSettings
+    );
 
-    const totalRunnerPay = runnerResults.reduce((sum, r) => sum + r.tip_amount, 0);
-    const remainingForWaiters = tipsAmount - totalRunnerPay;
-
-    // שלב 2: יתרה מתחלקת לפי שעות בין מלצרים+ברמנים
-    const totalWaiterHours = nonRunners.reduce((sum, w) => sum + Number(w.hours_worked), 0);
-    
-    let waiterResults: TipResult[] = [];
-    if (totalWaiterHours > 0 && remainingForWaiters > 0) {
-      const hourlyRate = remainingForWaiters / totalWaiterHours;
-      waiterResults = nonRunners.map(w => ({
-        waiter_id: w.waiter_id,
-        full_name: w.full_name,
-        role: w.role,
-        hours: Number(w.hours_worked),
-        tip_amount: Math.round(Number(w.hours_worked) * hourlyRate * 100) / 100,
-        is_runner: false,
-      }));
-    } else {
-      waiterResults = nonRunners.map(w => ({
-        waiter_id: w.waiter_id,
-        full_name: w.full_name,
-        role: w.role,
-        hours: Number(w.hours_worked),
-        tip_amount: 0,
-        is_runner: false,
-      }));
-    }
-
-    setTipResults([...runnerResults, ...waiterResults]);
+    setTipsCapped(allocation.capped);
+    setTipResults(allocation.results);
     setSavedDistribution(false);
   }
 
@@ -392,53 +391,29 @@ export default function AdminDashboard() {
       const runnerHours = tipResults.filter(r => r.is_runner).reduce((s, r) => s + r.hours, 0);
       const waiterHours = tipResults.filter(r => !r.is_runner).reduce((s, r) => s + r.hours, 0);
       const totalRunnerPay = tipResults.filter(r => r.is_runner).reduce((s, r) => s + r.tip_amount, 0);
-      const remaining = tipsAmount - totalRunnerPay;
+      const remaining = Math.max(0, tipsAmount - totalRunnerPay);
       const hourlyRate = waiterHours > 0 ? remaining / waiterHours : 0;
 
-      // מחיקת חלוקה ישנה אם קיימת
-      const { data: existing } = await supabase
-        .from('tip_distributions')
-        .select('id')
-        .eq('distribution_date', tipsDate)
-        .maybeSingle();
-      
-      if (existing) {
-        await supabase.from('tip_distribution_details').delete().eq('distribution_id', existing.id);
-        await supabase.from('tip_distributions').delete().eq('id', existing.id);
-      }
+      // Transactional upsert in the DB — updates amounts in place and NEVER touches
+      // confirmed_at, so re-saving a day doesn't wipe existing confirmations.
+      const { error: saveError } = await supabase.rpc('save_tip_distribution', {
+        p_date: tipsDate,
+        p_total: tipsAmount,
+        p_runner_rate: tipSettings.runnerRate,
+        p_total_runner_hours: runnerHours,
+        p_total_waiter_hours: waiterHours,
+        p_total_runner_pay: totalRunnerPay,
+        p_remaining: remaining,
+        p_hourly_rate: hourlyRate,
+        p_details: tipResults.map(r => ({
+          waiter_id: r.waiter_id,
+          role: r.role,
+          hours_worked: r.hours,
+          tip_amount: r.tip_amount,
+        })),
+      });
 
-      // יצירת חלוקה חדשה
-      const { data: newDist, error: distError } = await supabase
-        .from('tip_distributions')
-        .insert({
-          distribution_date: tipsDate,
-          total_tips: tipsAmount,
-          runner_rate: RUNNER_RATE,
-          total_runner_hours: runnerHours,
-          total_waiter_hours: waiterHours,
-          total_runner_pay: totalRunnerPay,
-          remaining_for_waiters: remaining,
-          hourly_rate_waiters: hourlyRate,
-        })
-        .select()
-        .single();
-
-      if (distError) throw distError;
-
-      // הוספת פרטים לכל מלצר
-      const details = tipResults.map(r => ({
-        distribution_id: newDist.id,
-        waiter_id: r.waiter_id,
-        role: r.role,
-        hours_worked: r.hours,
-        tip_amount: r.tip_amount,
-      }));
-
-      const { error: detailsError } = await supabase
-        .from('tip_distribution_details')
-        .insert(details);
-
-      if (detailsError) throw detailsError;
+      if (saveError) throw saveError;
 
       setSavedDistribution(true);
       alert('חלוקת הטיפים נשמרה בהצלחה ✅');
@@ -481,28 +456,12 @@ export default function AdminDashboard() {
     
     try {
       const supabase = createClient();
-      const now = new Date();
-      
-      // קודם נשלוף את clock_in כדי לחשב hours_worked
-      const { data: shiftData, error: fetchError } = await supabase
-        .from('shift_clock')
-        .select('clock_in')
-        .eq('id', shiftId)
-        .single();
-      
-      if (fetchError || !shiftData) throw new Error('לא נמצאה משמרת');
-      
-      const clockIn = new Date(shiftData.clock_in);
-      const hoursWorked = Number(((now.getTime() - clockIn.getTime()) / 3600000).toFixed(2));
-      
+
+      // Server-side manual close: DB stamps now(), computes hours, and logs the
+      // manager action in shift_clock_audit.
       const { error: updateError } = await supabase
-        .from('shift_clock')
-        .update({
-          clock_out: now.toISOString(),
-          hours_worked: hoursWorked,
-        })
-        .eq('id', shiftId);
-      
+        .rpc('clock_out', { p_clock_id: shiftId, p_manual: true });
+
       if (updateError) throw updateError;
       
       await loadData();
@@ -842,6 +801,12 @@ export default function AdminDashboard() {
                       )}
                     </div>
 
+                    {tipsCapped && (
+                      <div className="bg-amber-50 border border-amber-200 text-amber-800 text-sm rounded-lg p-3 mb-2">
+                        ⚠️ השכר הקבוע (ראנרים{tipSettings.includeHostess ? '/מארחת' : ''}) עלה על קופת הטיפים — הוקטן פרופורציונלית כך שסך החלוקה לא יעלה על הקופה. למלצרים לא נשארה יתרה.
+                      </div>
+                    )}
+
                     <div className="space-y-2">
                       {tipResults.map((r) => (
                         <div key={r.waiter_id} className={`flex items-center justify-between p-3 rounded-lg ${
@@ -855,7 +820,7 @@ export default function AdminDashboard() {
                               <p className="font-medium text-slate-900">{r.full_name}</p>
                               <p className="text-xs text-slate-500">
                                 {roleLabels[r.role]} · {r.hours.toFixed(2)} שעות
-                                {r.is_runner && ` × ${RUNNER_RATE}₪`}
+                                {r.is_runner && ` × ${r.role === 'hostess' ? tipSettings.hostessRate : tipSettings.runnerRate}₪${tipsCapped ? ' (הוקטן לתקרה)' : ''}`}
                               </p>
                             </div>
                           </div>

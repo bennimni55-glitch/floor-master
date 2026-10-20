@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/server';
 import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 import { buildQuizGeneratorPrompt } from '@/lib/anthropic/prompts';
+import { sanitizeQuestions } from '@/lib/quiz';
 
 interface GeneratedQuestion {
   category: string;
@@ -59,8 +60,8 @@ export async function GET() {
       const shuffled = [...existingQuestions].sort(() => Math.random() - 0.5);
       const selected = shuffled.slice(0, 3);
       
-      return NextResponse.json({ 
-        questions: selected,
+      return NextResponse.json({
+        questions: sanitizeQuestions(selected),
         source: 'database'
       });
     }
@@ -116,8 +117,8 @@ export async function GET() {
       .insert(questionsToSave)
       .select('id, category, difficulty, question_text, options, explanation, points');
 
-    return NextResponse.json({ 
-      questions: savedQuestions || parsed.questions,
+    return NextResponse.json({
+      questions: sanitizeQuestions(savedQuestions || parsed.questions),
       source: 'ai'
     });
 

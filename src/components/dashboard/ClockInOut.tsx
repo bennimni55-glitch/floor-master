@@ -63,22 +63,18 @@ export function ClockInOut({ waiterId, waiterName, activeClockId, activeClockSta
     setError(null);
     try {
       const supabase = createClient();
-      const now = new Date();
-      
+
+      // Server-side clock-in: the DB stamps now() and the Israel-local clock_date,
+      // so the employee's phone clock can't shift the recorded time.
       const { data, error: insertError } = await supabase
-        .from('shift_clock')
-        .insert({
-          waiter_id: waiterId,
-          clock_in: now.toISOString(),
-          clock_date: now.toISOString().split('T')[0],
-        })
-        .select()
+        .rpc('clock_in', { p_waiter_id: waiterId })
         .single();
 
       if (insertError) throw insertError;
-      
-      setClockId(data.id);
-      setClockStart(now);
+
+      const row = data as { id: string; clock_in: string };
+      setClockId(row.id);
+      setClockStart(new Date(row.clock_in));
     } catch (err: unknown) {
       const e = err as { message?: string };
       setError(e.message || 'שגיאה בהתחלת משמרת');
@@ -95,23 +91,19 @@ export function ClockInOut({ waiterId, waiterName, activeClockId, activeClockSta
     setError(null);
     try {
       const supabase = createClient();
-      const now = new Date();
-      const duration = calculateDuration(clockStart, now);
-      const hoursDecimal = (duration.totalSeconds / 3600).toFixed(2);
 
-      const { error: updateError } = await supabase
-        .from('shift_clock')
-        .update({
-          clock_out: now.toISOString(),
-          hours_worked: parseFloat(hoursDecimal),
-        })
-        .eq('id', clockId);
+      // Server-side clock-out: the DB stamps now() and computes hours_worked itself.
+      const { data, error: updateError } = await supabase
+        .rpc('clock_out', { p_clock_id: clockId })
+        .single();
 
       if (updateError) throw updateError;
-      
+
+      const row = data as { clock_out: string; hours_worked: number };
+      const duration = calculateDuration(clockStart, new Date(row.clock_out));
       const hoursStr = String(duration.hours).padStart(2, '0');
       const minsStr = String(duration.minutes).padStart(2, '0');
-      alert(`סיימת משמרת! עבדת ${hoursStr}:${minsStr} שעות (${hoursDecimal} שעות)`);
+      alert(`סיימת משמרת! עבדת ${hoursStr}:${minsStr} שעות (${row.hours_worked} שעות)`);
       
       setClockId(null);
       setClockStart(null);
