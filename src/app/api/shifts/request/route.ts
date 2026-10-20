@@ -22,6 +22,7 @@ async function getWaiter() {
   const { data: access } = await publicClient
     .from('user_app_access')
     .select('can_access_floor_master')
+    .eq('user_id', user.id)
     .single();
 
   if (!access?.can_access_floor_master) return null;

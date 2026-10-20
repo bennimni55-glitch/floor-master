@@ -22,6 +22,7 @@ async function checkAdmin() {
   const { data: access } = await publicClient
     .from('user_app_access')
     .select('is_floor_master_admin')
+    .eq('user_id', user.id)
     .single();
 
   return { 

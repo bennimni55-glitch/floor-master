@@ -39,14 +39,14 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(new URL('/', request.url));
   }
 
-  // הגנת /admin - רק owner
+  // הגנת /admin — אותה בדיקה בדיוק כמו ב-API: is_floor_master_admin (owner או manager)
   if (user && request.nextUrl.pathname.startsWith('/admin')) {
-    const { data: roles } = await supabase
-      .from('user_roles')
-      .select('role_id')
-      .eq('user_id', user.id);
-    const isOwner = (roles || []).some((r) => r.role_id === 'owner');
-    if (!isOwner) {
+    const { data: access } = await supabase
+      .from('user_app_access')
+      .select('is_floor_master_admin')
+      .eq('user_id', user.id)
+      .single();
+    if (access?.is_floor_master_admin !== true) {
       return NextResponse.redirect(new URL('/', request.url));
     }
   }

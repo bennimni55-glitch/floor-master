@@ -51,6 +51,7 @@ export default async function HomePage() {
   const { data: access } = await publicClient
     .from('user_app_access')
     .select('can_access_floor_master, is_floor_master_admin')
+    .eq('user_id', user.id)
     .single();
 
   if (!access?.can_access_floor_master) {

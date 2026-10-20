@@ -37,7 +37,8 @@ export async function GET() {
     const { data: access } = await publicClient
       .from('user_app_access')
       .select('can_access_floor_master')
-      .single();
+    .eq('user_id', user.id)
+    .single();
 
     if (!access?.can_access_floor_master) {
       return NextResponse.json({ error: 'אין הרשאה' }, { status: 403 });
