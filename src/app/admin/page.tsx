@@ -39,29 +39,6 @@ interface AvailabilityRow {
   end_time: string | null;
 }
 
-interface Assignment {
-  assignment_id: string;
-  waiter_id: string;
-  shift_id: string;
-  status: string;
-  shift_date: string;
-  shift_type: string;
-  start_time: string;
-  end_time: string;
-  waiter_name: string;
-}
-
-interface Shift {
-  id: string;
-  shift_date: string;
-  shift_type: string;
-  start_time: string;
-  end_time: string;
-  required_waiters: number;
-  required_bartenders: number;
-  required_hostesses: number;
-}
-
 interface Waiter {
   id: string;
   full_name: string;
@@ -184,8 +161,6 @@ export default function AdminDashboard() {
   const [waiterStats, setWaiterStats] = useState<WaiterStat[]>([]);
   const [categories, setCategories] = useState<CategoryWeakness[]>([]);
   const [availability, setAvailability] = useState<AvailabilityRow[]>([]);
-  const [assignments, setAssignments] = useState<Assignment[]>([]);
-  const [shifts, setShifts] = useState<Shift[]>([]);
   const [waiters, setWaiters] = useState<Waiter[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
@@ -241,12 +216,10 @@ export default function AdminDashboard() {
       const supabase = createClient();
       const today = new Date().toISOString().split('T')[0];
 
-      const [statsRes, categoriesRes, availabilityRes, assignmentsRes, shiftsRes, waitersRes, activeShiftsRes] = await Promise.all([
+      const [statsRes, categoriesRes, availabilityRes, waitersRes, activeShiftsRes] = await Promise.all([
         supabase.from('admin_dashboard_stats').select('*').order('rank'),
         supabase.from('category_weakness').select('*').limit(5),
         supabase.from('weekly_availability').select('*'),
-        supabase.from('waiter_assignments').select('*'),
-        supabase.from('shifts').select('*').gte('shift_date', today).order('shift_date'),
         supabase.from('waiters').select('id, full_name, role').eq('is_active', true).order('full_name'),
         supabase.from('shift_clock')
           .select('id, waiter_id, clock_in, waiters!inner(full_name, role)')
@@ -257,8 +230,6 @@ export default function AdminDashboard() {
       setWaiterStats((statsRes.data || []) as WaiterStat[]);
       setCategories((categoriesRes.data || []) as CategoryWeakness[]);
       setAvailability((availabilityRes.data || []) as AvailabilityRow[]);
-      setAssignments((assignmentsRes.data || []) as Assignment[]);
-      setShifts((shiftsRes.data || []) as Shift[]);
       setWaiters((waitersRes.data || []) as Waiter[]);
 
       // עיבוד משמרות פעילות
@@ -436,18 +407,6 @@ export default function AdminDashboard() {
     };
   }
 
-  function getWaiterAssignment(waiterId: string, dateStr: string): Assignment | null {
-    return assignments.find(a => 
-      a.waiter_id === waiterId && 
-      a.shift_date === dateStr && 
-      a.status === 'approved'
-    ) || null;
-  }
-
-  function getShiftsForDate(dateStr: string): Shift[] {
-    return shifts.filter(s => s.shift_date === dateStr);
-  }
-
   async function manualClockOut(shiftId: string, waiterName: string) {
     if (!confirm(`לסגור את המשמרת של ${waiterName}?\n\nהשעה הנוכחית תרשם כשעת הסיום.`)) return;
     
@@ -478,39 +437,6 @@ export default function AdminDashboard() {
     const hours = Math.floor(minutes / 60);
     const mins = minutes % 60;
     return `${hours}:${mins.toString().padStart(2, '0')} שעות`;
-  }
-
-  async function assignWaiter(shiftId: string) {
-    if (!scheduleModal) return;
-    setActionLoading(shiftId);
-    setError(null);
-    
-    try {
-      const supabase = createClient();
-      const waiter = waiters.find(w => w.id === scheduleModal.waiterId);
-      
-      const { error: insertError } = await supabase
-        .from('shift_assignments')
-        .insert({
-          shift_id: shiftId,
-          waiter_id: scheduleModal.waiterId,
-          role_in_shift: waiter?.role || 'waiter',
-          status: 'approved',
-          requested_by_waiter: false,
-          confirmed: true,
-          confirmed_at: new Date().toISOString(),
-        });
-
-      if (insertError) throw insertError;
-      
-      setScheduleModal(null);
-      await loadData();
-    } catch (err: unknown) {
-      const e = err as { message?: string };
-      setError(e.message || 'שגיאה בשיבוץ');
-    } finally {
-      setActionLoading(null);
-    }
   }
 
   if (isLoading) {
@@ -568,9 +494,6 @@ export default function AdminDashboard() {
               className="text-sm font-medium bg-teal-700 text-white hover:bg-teal-800 px-3 py-1.5 rounded-lg transition flex items-center gap-1.5"
             >
               📅 סידור עבודה
-            </a>
-            <a href="/admin/shifts" className="text-sm text-slate-500 hover:text-slate-900 px-2">
-              ניהול משמרות
             </a>
             <a href="/" className="text-sm text-slate-500 hover:text-slate-900 px-2">
               ← בית
@@ -934,20 +857,14 @@ export default function AdminDashboard() {
                       {next7Days.map((day, i) => {
                         const dateStr = dateToISOString(day);
                         const avail = isWaiterAvailable(w.id, dateStr);
-                        const assignment = getWaiterAssignment(w.id, dateStr);
-                        
+
                         let bgClass = 'bg-slate-50 border-slate-200';
                         let symbol = '—';
                         let textColor = 'text-slate-400';
                         let title = 'לא הצהיר זמינות';
                         let clickable = false;
-                        
-                        if (assignment) {
-                          bgClass = 'bg-blue-100 border-blue-300';
-                          symbol = '✓';
-                          textColor = 'text-blue-700';
-                          title = `משובץ למשמרת ${shiftTypeLabels[assignment.shift_type] || assignment.shift_type}`;
-                        } else if (avail.available && avail.partial) {
+
+                        if (avail.available && avail.partial) {
                           bgClass = 'bg-amber-100 border-amber-300 hover:bg-amber-200 cursor-pointer';
                           symbol = '⏰';
                           textColor = 'text-amber-700';
@@ -979,7 +896,7 @@ export default function AdminDashboard() {
                             >
                               {symbol}
                             </button>
-                            {avail.partial && avail.times && !assignment && (
+                            {avail.partial && avail.times && (
                               <p className="text-[10px] text-amber-700 mt-0.5">
                                 {avail.times}
                               </p>
@@ -1108,48 +1025,20 @@ export default function AdminDashboard() {
               </button>
             </div>
 
-            {(() => {
-              const dayShifts = getShiftsForDate(scheduleModal.date);
-              
-              if (dayShifts.length === 0) {
-                return (
-                  <div className="text-center py-6">
-                    <div className="text-4xl mb-2">📅</div>
-                    <p className="text-sm text-slate-600 mb-3">אין משמרות מוגדרות ביום הזה</p>
-                    <a
-                      href="/admin/shifts"
-                      className="inline-block bg-slate-900 hover:bg-slate-800 text-white text-sm font-medium px-4 py-2 rounded-lg transition"
-                    >
-                      + צור משמרת ידנית
-                    </a>
-                  </div>
-                );
-              }
-
-              return (
-                <div className="space-y-2">
-                  <p className="text-xs text-slate-500 mb-2">בחר משמרת:</p>
-                  {dayShifts.map((shift) => (
-                    <button
-                      key={shift.id}
-                      onClick={() => assignWaiter(shift.id)}
-                      disabled={actionLoading === shift.id}
-                      className="w-full text-right bg-slate-50 hover:bg-slate-100 disabled:opacity-50 rounded-lg p-3 transition"
-                    >
-                      <p className="text-sm font-medium text-slate-900">
-                        {shiftTypeLabels[shift.shift_type] || shift.shift_type}
-                      </p>
-                      <p className="text-xs text-slate-500 mt-0.5">
-                        {shift.start_time.substring(0, 5)} - {shift.end_time.substring(0, 5)}
-                      </p>
-                      <p className="text-xs text-slate-400 mt-1">
-                        🍷 {shift.required_waiters} · 🍸 {shift.required_bartenders} · 👋 {shift.required_hostesses}
-                      </p>
-                    </button>
-                  ))}
-                </div>
-              );
-            })()}
+            {/* scheduling happens in the live roster (daily_roster) — the old
+                shifts/shift_assignments flow was retired 2026-10-20 */}
+            <div className="text-center py-6">
+              <div className="text-4xl mb-2">📅</div>
+              <p className="text-sm text-slate-600 mb-3">
+                {scheduleModal.waiterName} זמין/ה ביום הזה — השיבוץ עצמו מתבצע בסידור העבודה
+              </p>
+              <a
+                href="/admin/roster"
+                className="inline-block bg-teal-700 hover:bg-teal-800 text-white text-sm font-medium px-4 py-2 rounded-lg transition"
+              >
+                📅 פתח סידור עבודה
+              </a>
+            </div>
           </div>
         </div>
       )}

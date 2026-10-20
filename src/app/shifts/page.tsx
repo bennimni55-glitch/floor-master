@@ -4,77 +4,16 @@ import { useState, useEffect } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { AvailabilitySubmission } from '@/components/shifts/AvailabilitySubmission';
 
-interface Shift {
-  id: string;
-  shift_date: string;
-  shift_type: string;
-  start_time: string;
-  end_time: string;
-  required_waiters: number;
-  required_bartenders: number;
-  required_hostesses: number;
-  notes: string | null;
-  pending_requests: number;
-  approved_count: number;
-  i_requested: boolean;
-  my_status: string | null;
-}
-
-interface Constraint {
-  id: string;
-  constraint_date: string;
-  all_day: boolean;
-  start_time: string | null;
-  end_time: string | null;
-  reason: string | null;
-  status: string;
-  created_at: string;
-}
-
-const shiftTypeLabels: Record<string, string> = {
-  morning: 'בוקר',
-  evening: 'ערב',
-  closing: 'סגירה',
-  double: 'כפולה',
-};
-
-const statusLabels: Record<string, { text: string; color: string }> = {
-  requested: { text: '⏳ ממתין לאישור', color: 'bg-amber-100 text-amber-800' },
-  approved: { text: '✅ אושר', color: 'bg-green-100 text-green-800' },
-  rejected: { text: '❌ נדחה', color: 'bg-red-100 text-red-800' },
-  pending: { text: '⏳ ממתין', color: 'bg-amber-100 text-amber-800' },
-};
-
-function formatDate(dateStr: string): string {
-  const date = new Date(dateStr);
-  const days = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'];
-  return `${days[date.getDay()]} · ${date.getDate()}/${date.getMonth() + 1}`;
-}
-
-function formatTime(timeStr: string): string {
-  return timeStr.substring(0, 5);
-}
+// The roster (daily_roster + availability_submissions) is the single shift system.
+// The old request flow (shifts / shift_assignments) was removed 2026-10-20 — it had
+// been dead since June; its tables remain in the DB as archive only.
 
 export default function ShiftsPage() {
-  const [activeTab, setActiveTab] = useState<'roster' | 'shifts' | 'constraints'>('roster');
+  const [activeTab, setActiveTab] = useState<'roster' | 'constraints'>('roster');
   const [myWaiterId, setMyWaiterId] = useState<string | null>(null);
   const [myRoster, setMyRoster] = useState<{ roster_date: string; shift_role: string; role_number: number | null }[]>([]);
-  
-  const [shifts, setShifts] = useState<Shift[]>([]);
-  const [constraints, setConstraints] = useState<Constraint[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [actionLoading, setActionLoading] = useState<string | null>(null);
-
-  // טופס אילוץ חדש
-  const [showConstraintForm, setShowConstraintForm] = useState(false);
-  const [newConstraint, setNewConstraint] = useState({
-    constraint_date: '',
-    all_day: true,
-    start_time: '20:00',
-    end_time: '23:00',
-    reason: '',
-  });
 
   useEffect(() => {
     loadData();
@@ -85,134 +24,30 @@ export default function ShiftsPage() {
     setError(null);
     try {
       const supabase = createClient();
-
-      const [shiftsRes, constraintsRes] = await Promise.all([
-        supabase.from('available_shifts').select('*').order('shift_date', { ascending: true }),
-        supabase
-          .from('availability_constraints')
-          .select('*')
-          .gte('constraint_date', new Date().toISOString().split('T')[0])
-          .order('constraint_date', { ascending: true }),
-      ]);
-
-      setShifts((shiftsRes.data || []) as Shift[]);
-      setConstraints((constraintsRes.data || []) as Constraint[]);
-
-      // טעינת השיבוצים שלי (daily_roster) מהיום והלאה
-      try {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (user) {
-          const { data: waiterRow } = await supabase
-            .from('waiters')
-            .select('id')
-            .eq('auth_user_id', user.id)
-            .single();
-          if (waiterRow) {
-            setMyWaiterId(waiterRow.id);
-            const today = new Date().toISOString().split('T')[0];
-            const { data: rosterRows } = await supabase
-              .from('daily_roster')
-              .select('roster_date, shift_role, role_number')
-              .eq('waiter_id', waiterRow.id)
-              .gte('roster_date', today)
-              .order('roster_date', { ascending: true });
-            setMyRoster(rosterRows || []);
-          }
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        const { data: waiterRow } = await supabase
+          .from('waiters')
+          .select('id')
+          .eq('auth_user_id', user.id)
+          .single();
+        if (waiterRow) {
+          setMyWaiterId(waiterRow.id);
+          const today = new Date().toISOString().split('T')[0];
+          const { data: rosterRows } = await supabase
+            .from('daily_roster')
+            .select('roster_date, shift_role, role_number')
+            .eq('waiter_id', waiterRow.id)
+            .gte('roster_date', today)
+            .order('roster_date', { ascending: true });
+          setMyRoster(rosterRows || []);
         }
-      } catch (e) {
-        console.error('roster load error', e);
       }
     } catch (err) {
       console.error(err);
       setError('שגיאה בטעינה');
     } finally {
       setIsLoading(false);
-    }
-  }
-
-  async function requestShift(shiftId: string) {
-    setActionLoading(shiftId);
-    setError(null);
-    try {
-      const res = await fetch('/api/shifts/request', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ shift_id: shiftId }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'שגיאה');
-      await loadData();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'שגיאה');
-    } finally {
-      setActionLoading(null);
-    }
-  }
-
-  async function cancelRequest(shiftId: string) {
-    setActionLoading(shiftId);
-    setError(null);
-    try {
-      const res = await fetch(`/api/shifts/request?shift_id=${shiftId}`, {
-        method: 'DELETE',
-      });
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || 'שגיאה');
-      }
-      await loadData();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'שגיאה');
-    } finally {
-      setActionLoading(null);
-    }
-  }
-
-  async function addConstraint(e: React.FormEvent) {
-    e.preventDefault();
-    setActionLoading('add-constraint');
-    setError(null);
-    try {
-      const res = await fetch('/api/availability', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newConstraint),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'שגיאה');
-
-      setShowConstraintForm(false);
-      setNewConstraint({
-        constraint_date: '',
-        all_day: true,
-        start_time: '20:00',
-        end_time: '23:00',
-        reason: '',
-      });
-      await loadData();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'שגיאה');
-    } finally {
-      setActionLoading(null);
-    }
-  }
-
-  async function deleteConstraint(constraintId: string) {
-    if (!confirm('למחוק את האילוץ?')) return;
-    setActionLoading(constraintId);
-    try {
-      const res = await fetch(`/api/availability?id=${constraintId}`, {
-        method: 'DELETE',
-      });
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || 'שגיאה');
-      }
-      await loadData();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'שגיאה');
-    } finally {
-      setActionLoading(null);
     }
   }
 
@@ -224,9 +59,6 @@ export default function ShiftsPage() {
     );
   }
 
-  const myShifts = shifts.filter(s => s.i_requested);
-  const availableShifts = shifts.filter(s => !s.i_requested);
-
   return (
     <div dir="rtl" className="min-h-screen bg-slate-50">
       <header className="bg-white border-b border-slate-200">
@@ -237,7 +69,7 @@ export default function ShiftsPage() {
             </a>
             <div>
               <h1 className="font-semibold text-slate-900 leading-tight">משמרות</h1>
-              <p className="text-xs text-slate-500">בקש משמרות וסמן אילוצים</p>
+              <p className="text-xs text-slate-500">הסידור שלך והגשת זמינות</p>
             </div>
           </div>
           <a href="/" className="text-sm text-slate-500 hover:text-slate-900">
@@ -257,16 +89,6 @@ export default function ShiftsPage() {
               }`}
             >
               📋 המשמרות שלי {myRoster.length > 0 && `(${myRoster.length})`}
-            </button>
-            <button
-              onClick={() => setActiveTab('shifts')}
-              className={`px-4 py-3 text-sm font-medium transition border-b-2 ${
-                activeTab === 'shifts'
-                  ? 'text-slate-900 border-slate-900'
-                  : 'text-slate-500 border-transparent hover:text-slate-700'
-              }`}
-            >
-              📅 משמרות פנויות
             </button>
             <button
               onClick={() => setActiveTab('constraints')}
@@ -342,131 +164,7 @@ export default function ShiftsPage() {
           </>
         )}
 
-        {/* Tab: Shifts */}
-        {activeTab === 'shifts' && (
-          <>
-            {myShifts.length > 0 && (
-              <div className="mb-6">
-                <h2 className="text-sm font-semibold text-slate-900 mb-3 px-1">
-                  📋 המשמרות שלי ({myShifts.length})
-                </h2>
-                <div className="space-y-3">
-                  {myShifts.map((shift) => {
-                    const status = shift.my_status ? statusLabels[shift.my_status] : null;
-                    const totalRequired = shift.required_waiters + shift.required_bartenders + shift.required_hostesses;
-                    
-                    return (
-                      <div key={shift.id} className="bg-white rounded-xl border border-slate-200 p-4">
-                        <div className="flex justify-between items-start mb-3">
-                          <div>
-                            <p className="font-semibold text-slate-900">{formatDate(shift.shift_date)}</p>
-                            <p className="text-sm text-slate-500 mt-0.5">
-                              {formatTime(shift.start_time)} - {formatTime(shift.end_time)} · {shiftTypeLabels[shift.shift_type] || shift.shift_type}
-                            </p>
-                          </div>
-                          {status && (
-                            <span className={`text-xs px-2.5 py-1 rounded-md font-medium ${status.color}`}>
-                              {status.text}
-                            </span>
-                          )}
-                        </div>
-
-                        {shift.notes && (
-                          <p className="text-xs text-slate-500 mb-3 bg-slate-50 rounded p-2">{shift.notes}</p>
-                        )}
-
-                        <div className="flex justify-between items-center pt-3 border-t border-slate-100">
-                          <p className="text-xs text-slate-500">
-                            {shift.approved_count}/{totalRequired} שובצו
-                          </p>
-                          {shift.my_status === 'requested' && (
-                            <button
-                              onClick={() => cancelRequest(shift.id)}
-                              disabled={actionLoading === shift.id}
-                              className="text-xs text-red-600 hover:text-red-800 font-medium disabled:opacity-50"
-                            >
-                              {actionLoading === shift.id ? 'מבטל...' : '🚫 בטל בקשה'}
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
-            <div>
-              <h2 className="text-sm font-semibold text-slate-900 mb-3 px-1">
-                ✋ משמרות פנויות לבקשה ({availableShifts.length})
-              </h2>
-
-              {availableShifts.length === 0 ? (
-                <div className="bg-slate-100 border-2 border-dashed border-slate-300 rounded-2xl p-10 text-center">
-                  <div className="text-4xl mb-3">📅</div>
-                  <p className="text-sm text-slate-600">אין משמרות פנויות כרגע</p>
-                  <p className="text-xs text-slate-500 mt-1">המנהל עדיין לא פרסם משמרות חדשות</p>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {availableShifts.map((shift) => {
-                    const totalRequired = shift.required_waiters + shift.required_bartenders + shift.required_hostesses;
-                    const slotsLeft = totalRequired - shift.approved_count;
-                    
-                    return (
-                      <div key={shift.id} className="bg-white rounded-xl border border-slate-200 p-4">
-                        <div className="flex justify-between items-start mb-3">
-                          <div>
-                            <p className="font-semibold text-slate-900">{formatDate(shift.shift_date)}</p>
-                            <p className="text-sm text-slate-500 mt-0.5">
-                              {formatTime(shift.start_time)} - {formatTime(shift.end_time)} · {shiftTypeLabels[shift.shift_type] || shift.shift_type}
-                            </p>
-                          </div>
-                          <div className="text-left">
-                            <p className="text-xs text-slate-500">דרושים</p>
-                            <p className="text-lg font-bold text-slate-900">{slotsLeft}</p>
-                          </div>
-                        </div>
-
-                        <div className="flex gap-3 text-xs text-slate-600 mb-3">
-                          {shift.required_waiters > 0 && (
-                            <span>🍷 {shift.required_waiters} מלצרים</span>
-                          )}
-                          {shift.required_bartenders > 0 && (
-                            <span>🍸 {shift.required_bartenders} ברמנים</span>
-                          )}
-                          {shift.required_hostesses > 0 && (
-                            <span>👋 {shift.required_hostesses} מארחות</span>
-                          )}
-                        </div>
-
-                        {shift.notes && (
-                          <p className="text-xs text-slate-500 mb-3 bg-slate-50 rounded p-2">{shift.notes}</p>
-                        )}
-
-                        {shift.pending_requests > 0 && (
-                          <p className="text-xs text-amber-600 mb-3">
-                            ⏳ {shift.pending_requests} עוד מלצרים ביקשו
-                          </p>
-                        )}
-
-                        <button
-                          onClick={() => requestShift(shift.id)}
-                          disabled={actionLoading === shift.id}
-                          className="w-full bg-slate-900 hover:bg-slate-800 disabled:bg-slate-400 text-white text-sm font-medium py-2.5 rounded-lg transition"
-                        >
-                          {actionLoading === shift.id ? 'שולח...' : '✋ אני רוצה את המשמרת'}
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          </>
-        )}
-
-        {/* Tab: Constraints */}
+        {/* Tab: Availability */}
         {activeTab === 'constraints' && myWaiterId && (
           <AvailabilitySubmission waiterId={myWaiterId} />
         )}
